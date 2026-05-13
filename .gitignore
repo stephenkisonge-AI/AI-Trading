@@ -19,3 +19,11 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Watcher build
+.pytest_cache/
+state/*.json
+state/*.jsonl
+*.log
+old_regime_output.txt
+new_regime_output.txt
