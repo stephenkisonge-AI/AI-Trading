@@ -1,0 +1,354 @@
+# My Crypto Strategy — Final Version
+
+This is the strategy I want you to run for me on Alpaca paper trading. It's
+synthesized from mainstream crypto trading consensus (Binance Academy,
+Cowen's cycle work, CryptoCred's TA, Theseus TA paper, Duke investor's
+guide) plus rules I've worked through. Read it carefully and acknowledge
+back to me before we trade. If anything is ambiguous, ask.
+
+---
+
+## Hard constraints — non-negotiable
+
+- **Paper trading only.** Live trading is OFF. Do not even propose a live
+  trade until I explicitly tell you to flip the mode.
+- **Max notional per trade: $500.** No exceptions, no "this one is special."
+- **No leverage. No shorts.** Long-only spot crypto.
+- **No trade without all five components defined upfront:** entry, stop,
+  take-profit, position size, and a written thesis.
+- **Capital preservation > capital growth.** A skipped trade is free.
+  A bad trade isn't.
+- **Confirmation gate:** You never place an order without showing me the
+  full proposal and getting an explicit 'go' from me. Every single time.
+
+---
+
+## Architecture — two independent tracks
+
+The strategy runs on two separate tracks. They don't share capital
+allocations, they don't share signals, they don't interfere.
+
+### Track 1 — Active swing trading (default ON)
+Discretionary entries based on multi-timeframe technical setups.
+This is where we work. Most of this document is about this track.
+
+### Track 2 — DCA accumulation (default OFF)
+Weekly fixed-dollar buys of BTC and ETH only. Not for trading,
+for accumulation. Only enable when I explicitly say so. When enabled:
+- 60% BTC / 40% ETH split
+- Weekly cadence (same day every week)
+- Maximum $100/week combined unless I raise it
+- Held indefinitely — these are NOT swing positions
+
+For now, treat Track 2 as disabled. Don't act on it.
+
+---
+
+## Track 1: Swing trading
+
+### Asset universe (in priority order)
+
+Trade only these pairs. Add new pairs only if I approve.
+
+1. **BTC/USD** — primary
+2. **ETH/USD** — primary
+3. **SOL/USD** — only after we've seen 10+ trades on BTC and ETH and
+   confirmed the data quality on Alpaca is clean (no gaps, reasonable
+   spreads, working bars at 1H/4H/D)
+
+That's it for now. No LINK, no AVAX, no DOT, no AAVE until BTC and ETH
+prove the system works. Discipline > diversification.
+
+### Timeframes — three layers
+
+- **Daily** — market regime filter. Are we in a bull, bear, or chop
+  environment? This decides if we trade at all.
+- **4-hour** — setup confirmation. This is where pullbacks and
+  breakouts form.
+- **1-hour** — entry timing. This is where we pull the trigger.
+
+You must check all three before any entry.
+
+### Indicators
+
+- EMA 20, EMA 50, EMA 200 (on each timeframe)
+- RSI(14) (on each timeframe)
+- ATR(14) — for stop sizing
+- Volume SMA(20) — for confirmation
+- Recent swing highs/lows visible on the 4H chart
+
+### Market regime classification (Daily chart)
+
+Run this check first, before anything else. Output the regime label:
+
+- **Bullish:** Daily close > EMA 200 AND EMA 50 ≥ EMA 200 (or crossing
+  upward in the last 10 daily candles).
+- **Improving neutral:** Daily close > EMA 200 BUT EMA 50 < EMA 200
+  (early recovery).
+- **Choppy neutral:** Daily price oscillating within 5% of EMA 200
+  with no clear direction over 20 candles.
+- **Bearish:** Daily close < EMA 200 AND EMA 50 < EMA 200.
+
+Trading rules by regime:
+- **Bullish:** Both Setup A and Setup B are armed.
+- **Improving neutral:** Only Setup A (pullbacks). No breakout chasing.
+- **Choppy neutral:** No new entries. Manage open positions only.
+- **Bearish:** No new swing entries. If DCA is enabled, it continues.
+  Period.
+
+### Entry Setup A — Pullback continuation
+
+Long entry triggers only when ALL of these are true:
+
+1. Daily regime is **bullish** or **improving neutral**.
+2. On the 4H chart, price > EMA 200.
+3. Price has pulled back to within 1% of the 4H EMA 20 OR EMA 50,
+   without breaking the most recent 4H higher low.
+4. On the 4H chart, RSI(14) is between **35 and 50** (the oversold-but-
+   not-broken zone — concrete, mechanical, no "turning upward" subjective
+   reading).
+5. On the 1H chart, the most recent closed candle is green AND closes
+   back above the 1H EMA 20.
+6. Volume on that 1H entry candle ≥ 0.8× the 20-period average volume
+   (filter out dead-zone moves).
+7. A logical stop placement exists: below the most recent 4H swing low,
+   AND that stop distance is no more than 1.5× the 4H ATR(14).
+8. No existing position in this asset.
+
+### Entry Setup B — Breakout retest
+
+Long entry triggers only when ALL of these are true:
+
+1. Daily regime is **bullish** (not neutral — breakouts in chop fail).
+2. Price has broken above a clear 4H resistance zone or the 20-period
+   high in the last 10 candles.
+3. The breakout 4H candle closed above the level (no wicks-only).
+4. Volume on the breakout candle ≥ 1.2× the 20-period average volume.
+5. RSI(14) on the 4H chart is between 50 and 70 (momentum confirmed,
+   not exhausted).
+6. Price has retested the broken level (now support) on the 1H chart
+   and held — meaning the 1H low touched within 0.5% of the level
+   and the next 1H candle closed green above it.
+7. A logical stop placement exists: just below the retested level,
+   AND that stop distance is no more than 1.5× the 4H ATR(14).
+8. No existing position in this asset.
+
+**No chasing rule:** If the breakout has already moved more than
+2× ATR above the breakout level without a retest, we missed it.
+Skip and wait for the next setup.
+
+### Position sizing — R-based, capped
+
+Calculate in this exact order:
+
+1. Define **stop distance %** = (entry - stop) / entry × 100.
+2. Define **risk dollars** = 1% of current account equity.
+3. Required position size (notional) = risk dollars / stop distance %.
+4. **Cap that at $500 notional.**
+5. If the calculated position would be < $50 notional, skip the trade
+   (not enough room to be meaningful after fees).
+6. If stop distance > 8%, skip the trade — the entry is too far from
+   support, the trade has poor risk/reward by definition.
+
+Include estimated fees (~0.25% per side on Alpaca crypto) in the
+calculation. Round notional down to a quantity Alpaca will accept.
+
+### Stops, targets, and trade management
+
+**Initial stop:** Whichever is tighter:
+- 1.5× ATR(14) below entry on the 4H chart
+- Just below the most recent 4H swing low
+
+Place this as a separate stop-limit order on Alpaca **immediately after
+fill confirmation.** Don't wait. Use `place_crypto_order` with
+`order_type="stop_limit"`.
+
+**Reward/risk minimum:** 2R required to enter. If we can't see a
+realistic path to 2R based on the next overhead resistance, skip.
+
+**Take-profit ladder:**
+- **TP1 at +1.5R:** close 50% of position. Place as a separate limit
+  sell order.
+- **Move stop to breakeven** after TP1 fills.
+- **TP2 at +3R:** close another 25% as a limit order.
+- **Final 25%:** trail with a 2× ATR stop OR exit on a 4H close below
+  the EMA 20, whichever triggers first.
+
+**Time stop:** If a trade hasn't hit TP1 within 10 days, close it at
+market. Capital should be working.
+
+**Hard exit:** If the daily regime flips from bullish to bearish (daily
+close below EMA 200 with confirmation candle), exit ALL open swing
+positions at market regardless of P&L.
+
+**Stops never widen.** Ever. They only tighten or move toward profit.
+
+### Risk caps
+
+These are firm limits. Hitting any of them stops trading.
+
+- **Max simultaneous positions:** 2.
+- **Max new entries per day:** 1.
+- **Daily loss limit:** -2% of account equity (realized + unrealized).
+  If hit, stop trading until next UTC day.
+- **Weekly loss limit:** -5% of account equity. If hit, stop trading
+  until the following Monday UTC.
+- **Consecutive loss cooldown:** After 3 losing trades in a row, pause
+  for 24 hours minimum. Tell me. We review before resuming.
+- **No-trade conditions:** Skip any trade if you observe:
+  - Bid/ask spread > 0.5% on a major
+  - Missing or stale candles in the data
+  - API errors during signal evaluation
+  - Recent (< 60 min) price gap > 5% with no clear cause
+
+---
+
+## Operating procedure
+
+### Scan cadence
+
+Crypto trades 24/7 on Alpaca, so timing is consistent. Run a full scan
+when each 4H candle closes (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC).
+
+For each scan, in this order:
+
+1. **Account check** — call `get_account_info`. Confirm paper mode and
+   show current equity, P&L, day's running loss vs the -2% cap.
+2. **Position check** — call `get_all_positions`. For each open position,
+   check distance to stop, distance to next TP, and time-in-trade vs
+   the 10-day cap.
+3. **Order check** — call `get_orders(status="open")`. Confirm protective
+   orders (stops, TPs) are in place for every open position. If any are
+   missing, fix immediately and tell me.
+4. **Regime classification** — pull daily bars, compute EMAs, output the
+   current regime label.
+5. **Setup scan** — for each pair in the universe (BTC, ETH, and SOL if
+   enabled), evaluate Setup A and Setup B against the full checklist.
+   Tell me what you found.
+6. **Risk gate** — verify we haven't hit daily/weekly loss caps or
+   consecutive-loss cooldown.
+7. **Propose if anything qualified.** Otherwise, summarize and stand down.
+
+### Trade proposal format
+
+When something triggers, present it exactly like this:
+
+```
+=== ENTRY CANDIDATE: ETH/USD — Setup A (Pullback) ===
+
+Regime check:
+  ✓ Daily bullish: close $XXX > EMA200 $XXX, EMA50 > EMA200
+
+Setup conditions (8/8):
+  ✓ 4H price $XXX > 4H EMA 200 $XXX
+  ✓ Pulled back to 4H EMA 20 ($XXX, distance 0.4%)
+  ✓ Higher low intact: prior swing low $XXX still holds
+  ✓ 4H RSI = 41.2 (in 35-50 zone)
+  ✓ 1H last candle: green, close $XXX above 1H EMA 20 $XXX
+  ✓ 1H volume: 1.05× 20-avg
+  ✓ Stop distance: 1.2× ATR (acceptable)
+  ✓ No open ETH position
+
+Risk math:
+  Account equity: $XXXX
+  Risk per trade (1%): $XX
+  Entry: $XXX
+  Stop: $XXX (-3.4%)
+  Position size: $500 (capped) → 0.XXX ETH
+  TP1: $XXX (+5.1%, +1.5R) — sell 50%
+  TP2: $XXX (+10.2%, +3R) — sell 25%
+  Trail: remaining 25%, 2× ATR or 4H EMA 20 close
+  Time stop: 10 days
+
+Thesis: ETH in confirmed daily bull regime, pulled back cleanly to
+4H EMA 20 without breaking structure. RSI reset to 41 from overbought
+on the prior leg. 1H showing first green close above its short EMA.
+
+Invalidation: 1H close below $XXX (the swing low we're using for stop).
+
+Type 'go' to execute, 'skip' to pass, or 'why' for more detail.
+```
+
+After 'go':
+1. Place market entry via `place_crypto_order`.
+2. **Wait for fill confirmation.**
+3. Immediately place protective stop-limit order.
+4. Immediately place TP1 limit sell (50% qty).
+5. Immediately place TP2 limit sell (25% qty).
+6. Confirm all four orders by reading them back via `get_orders`.
+7. Tell me: "All protective orders placed. Position is now monitored."
+
+### Daily summary (once per UTC day)
+
+- Open positions and their unrealized P&L
+- Trades closed in the last 24h with P&L in $ and R-multiples
+- Day's running P&L vs the -2% cap
+- Week's running P&L vs the -5% cap
+- Any rule violations, skipped setups, missed setups, or API issues
+- One-line read on regime: "Still bullish" / "Weakening" / "Flipped"
+
+---
+
+## Trade journal
+
+Maintain a running journal in this conversation for every trade:
+
+- Entry timestamp, symbol, setup type (A or B), entry price, size
+- Stop, TP1, TP2 levels at entry
+- Thesis (one or two sentences)
+- Invalidation criteria
+- Exit timestamp, exit price, exit reason
+- Realized P&L in $ and R
+- Lesson learned (even if just "rule worked as expected")
+
+If at some point I set up a Google Sheets MCP, write the journal there
+instead. Until then, keep it in our conversation and remind me weekly
+to copy it somewhere durable.
+
+---
+
+## What you do NOT do
+
+- You do not predict prices.
+- You do not act on news, tweets, influencer calls, or vibes.
+- You do not chase pumps. If we missed it, we missed it.
+- You do not trade against the daily regime, even if a setup "looks good."
+- You do not move stops in the wrong direction. Ever.
+- You do not skip the confirmation gate, even if the same setup
+  triggers three times in a row.
+- You do not increase size after a loss.
+- You do not average down on a loser.
+- You do not give me investment advice. You execute the rules above.
+
+---
+
+## Before we start — acknowledge
+
+Please:
+
+1. Confirm you've read this whole document.
+2. State the 3 pairs in the universe (and which are active vs gated).
+3. State the 4 regime labels and the trading rule for each.
+4. State the 8 conditions for Setup A.
+5. State the 8 conditions for Setup B.
+6. State the 5 risk caps.
+7. Call `get_account_info` and confirm we're in paper mode with current
+   equity.
+8. Then ask: "Run the first scan now, or wait for the next 4H close?"
+
+---
+
+## My reminder to myself
+
+This is paper trading. Real money is not at risk. The point is to test
+whether this rule set actually generates positive expectancy across at
+least 30 trades — not whether it makes money on the first three. Even
+if paper performance is excellent, I will sit with the results for at
+least 60 days before considering live capital, and I will not consider
+live capital larger than what I'd be comfortable losing entirely.
+
+This is a structured experiment, not a path to wealth. Nothing here is
+investment advice — it is a discipline framework for me to test against
+real markets safely.
+
+Let's begin.
