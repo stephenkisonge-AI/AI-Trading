@@ -6,6 +6,11 @@ on:
     # +2 min buffer so the daily candle has settled before we scan.
     - cron: '2 3 * * *'
   workflow_dispatch:
+    inputs:
+      test_ping:
+        description: 'Send a Telegram test ping instead of running the scan'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,7 +30,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Send Telegram test ping
+        if: github.event.inputs.test_ping == 'true'
+        run: |
+          python -c "import sys; from src.notifier import send_alert; sys.exit(0 if send_alert('🧪 GitHub Actions → Telegram pipeline test. (workflow_dispatch with test_ping=true.)') else 1)"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
       - name: Run watcher
+        if: github.event.inputs.test_ping != 'true'
         run: python -m src.watcher
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
