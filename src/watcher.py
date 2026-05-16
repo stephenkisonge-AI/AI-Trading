@@ -9,16 +9,35 @@ from __future__ import annotations
 
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
 from src.data import _assert_paper_mode, get_bars, get_positions
 from src.indicators import add_indicators
-from src.notifier import format_setup_alert, send_alert
+from src.notifier import format_scan_summary, format_setup_alert, send_alert
 from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
 
 SYMBOLS = ["BTC/USD", "ETH/USD"]
+
+# Cron schedule: 04:17 UTC daily (see .github/workflows/watcher.yml).
+# Keep these in sync if the cron changes — they drive the "next scan" line
+# in the Telegram summary.
+_CRON_UTC_HOUR = 4
+_CRON_UTC_MINUTE = 17
+_NAIROBI = timezone(timedelta(hours=3))
+
+
+def _next_scan_eat(run_started_utc: datetime) -> str:
+    """Format the next scheduled scan time as Nairobi-local. The watcher
+    only completes after the cron has fired, so the next firing is always
+    the following day's slot.
+    """
+    today_slot = run_started_utc.replace(
+        hour=_CRON_UTC_HOUR, minute=_CRON_UTC_MINUTE, second=0, microsecond=0
+    )
+    next_utc = today_slot if run_started_utc < today_slot else today_slot + timedelta(days=1)
+    return next_utc.astimezone(_NAIROBI).strftime("%a %Y-%m-%d %H:%M EAT")
 
 
 def _alpaca_position_symbol(symbol: str) -> str:
@@ -92,9 +111,11 @@ def main() -> int:
         return 0
 
     errors: list[str] = []
+    scan_results: list[dict] = []
     for symbol in SYMBOLS:
         try:
             result = _scan_symbol(symbol, positions)
+            scan_results.append(result)
             summary = (
                 f"[watcher] {symbol}: regime={result['regime']} "
                 f"has_position={result['has_position']} "
@@ -115,11 +136,10 @@ def main() -> int:
             print(f"[watcher] ERROR scanning {symbol}: {exc}\n{tb}", file=sys.stderr)
             errors.append(f"{symbol}: {exc}")
 
-    if errors:
-        send_alert(
-            f"⚠️ Watcher errors at {run_started.strftime('%H:%M UTC')}\n"
-            + "\n".join(f"- {e}" for e in errors)
-        )
+    next_scan_eat = _next_scan_eat(run_started)
+    summary_msg = format_scan_summary(scan_results, errors, run_started, next_scan_eat)
+    sent = send_alert(summary_msg)
+    print(f"[watcher] sent end-of-run summary: {sent}")
 
     print(f"[watcher] done at {datetime.now(timezone.utc).isoformat()}")
     return 0

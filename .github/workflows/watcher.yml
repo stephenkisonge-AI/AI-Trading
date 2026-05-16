@@ -2,9 +2,10 @@ name: Daily Watcher
 
 on:
   schedule:
-    # 03:02 UTC = 06:02 EAT (Nairobi).
-    # +2 min buffer so the daily candle has settled before we scan.
-    - cron: '2 3 * * *'
+    # 04:17 UTC = 07:17 EAT (Nairobi).
+    # Off-the-hour minute to avoid GitHub Actions free-tier scheduler lag
+    # that hits top-of-hour cron jobs. Daily candle is already settled.
+    - cron: '17 4 * * *'
   workflow_dispatch:
     inputs:
       test_ping:

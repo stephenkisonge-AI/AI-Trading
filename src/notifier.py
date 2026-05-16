@@ -85,3 +85,55 @@ def format_setup_alert(result: dict, regime: str) -> str:
     ]
 
     return "\n".join([header, ""] + checklist_lines + levels_lines + footer)
+
+
+def format_scan_summary(
+    scan_results: list[dict],
+    errors: list[str],
+    run_started,
+    next_scan_eat: str,
+) -> str:
+    """End-of-run pulse message sent on every scan.
+
+    Header switches on outcome so the user can see at a glance whether to
+    act: 🟢 green light (a setup qualified), 🔴 stand down (clean scan, no
+    entries), ⚠️ errors (something failed mid-scan).
+    """
+    any_qualified = any(
+        r["setup_a"]["qualified"] or r["setup_b"]["qualified"]
+        for r in scan_results
+    )
+    if errors:
+        header = "⚠️ DAILY SCAN — ERRORS"
+    elif any_qualified:
+        header = "🟢 DAILY SCAN — GREEN LIGHT"
+    else:
+        header = "🔴 DAILY SCAN — STAND DOWN"
+
+    ts = run_started.strftime("%Y-%m-%d %H:%M UTC")
+    lines = [header, ts, ""]
+
+    for r in scan_results:
+        sym = r["symbol"]
+        regime = r["regime"]
+        qualifying = [s for s in (r["setup_a"], r["setup_b"]) if s["qualified"]]
+        if qualifying:
+            tags = ", ".join(f"Setup {q['setup']} qualified" for q in qualifying)
+            lines.append(f"• {sym} — {regime} · {tags}")
+        else:
+            lines.append(f"• {sym} — {regime} · no entry")
+
+    if errors:
+        lines.append("")
+        lines.append("Errors:")
+        for e in errors:
+            lines.append(f"  - {e}")
+
+    lines.append("")
+    lines.append(f"Next scan: {next_scan_eat}")
+    if any_qualified:
+        lines.append("→ See detailed alert(s) above. Confirm via Claude Code + Alpaca MCP before placing.")
+    elif not errors:
+        lines.append("Long-only spec → no action while bearish.")
+
+    return "\n".join(lines).rstrip()
