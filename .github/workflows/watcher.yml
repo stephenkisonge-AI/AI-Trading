@@ -2,10 +2,12 @@ name: Daily Watcher
 
 on:
   schedule:
-    # 04:17 UTC = 07:17 EAT (Nairobi).
-    # Off-the-hour minute to avoid GitHub Actions free-tier scheduler lag
-    # that hits top-of-hour cron jobs. Daily candle is already settled.
+    # Primary: 04:17 UTC = 07:17 EAT (Nairobi). Off-the-hour minute to
+    # dodge GitHub Actions free-tier scheduler lag at the top of the hour.
     - cron: '17 4 * * *'
+    # Fallback: 14:00 UTC = 17:00 EAT. Runs only if today's primary did
+    # NOT complete successfully — guarded below via gh api lookup.
+    - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
       test_ping:
@@ -15,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # fallback guard needs to query workflow runs
 
 jobs:
   scan:
@@ -39,8 +42,27 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
+      - name: Skip fallback if primary already ran today
+        id: guard
+        if: github.event.schedule == '0 14 * * *'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          today=$(date -u +%Y-%m-%d)
+          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/watcher.yml/runs?event=schedule&status=success&per_page=20" \
+            --jq "[.workflow_runs[] | select(.created_at | startswith(\"${today}\"))] | length")
+          echo "today=${today}"
+          echo "successful_schedule_runs_today=${count}"
+          if [ "${count}" -gt 0 ]; then
+            echo "Primary already ran today — skipping fallback."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No successful schedule run today — running fallback."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run watcher
-        if: github.event.inputs.test_ping != 'true'
+        if: github.event.inputs.test_ping != 'true' && steps.guard.outputs.skip != 'true'
         run: python -m src.watcher
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
@@ -48,3 +70,4 @@ jobs:
           ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WATCHER_RUN_KIND: ${{ github.event.schedule == '0 14 * * *' && 'fallback' || 'primary' }}

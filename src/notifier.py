@@ -92,12 +92,15 @@ def format_scan_summary(
     errors: list[str],
     run_started,
     next_scan_eat: str,
+    run_kind: str = "primary",
 ) -> str:
     """End-of-run pulse message sent on every scan.
 
     Header switches on outcome so the user can see at a glance whether to
     act: 🟢 green light (a setup qualified), 🔴 stand down (clean scan, no
-    entries), ⚠️ errors (something failed mid-scan).
+    entries), ⚠️ errors (something failed mid-scan). A `(FALLBACK)` tag is
+    appended when `run_kind == "fallback"` — i.e. the primary cron missed
+    and the safety-net cron picked it up later.
     """
     any_qualified = any(
         r["setup_a"]["qualified"] or r["setup_b"]["qualified"]
@@ -109,6 +112,8 @@ def format_scan_summary(
         header = "🟢 DAILY SCAN — GREEN LIGHT"
     else:
         header = "🔴 DAILY SCAN — STAND DOWN"
+    if run_kind == "fallback":
+        header += " (FALLBACK)"
 
     ts = run_started.strftime("%Y-%m-%d %H:%M UTC")
     lines = [header, ts, ""]

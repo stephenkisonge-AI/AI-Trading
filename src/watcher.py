@@ -7,6 +7,7 @@ Alpaca MCP with manual confirmation.
 """
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from datetime import datetime, timedelta, timezone
@@ -137,9 +138,12 @@ def main() -> int:
             errors.append(f"{symbol}: {exc}")
 
     next_scan_eat = _next_scan_eat(run_started)
-    summary_msg = format_scan_summary(scan_results, errors, run_started, next_scan_eat)
+    run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")
+    summary_msg = format_scan_summary(
+        scan_results, errors, run_started, next_scan_eat, run_kind=run_kind
+    )
     sent = send_alert(summary_msg)
-    print(f"[watcher] sent end-of-run summary: {sent}")
+    print(f"[watcher] sent end-of-run summary (kind={run_kind}): {sent}")
 
     print(f"[watcher] done at {datetime.now(timezone.utc).isoformat()}")
     return 0
