@@ -181,10 +181,70 @@ def format_management_action(action: dict) -> str:
             "INTERVENE: position protection may be compromised.",
         ])
 
+    if kind == "trail_raise":
+        if action.get("success"):
+            return "\n".join([
+                f"📈 TRAIL RAISED — {sym} (runner)",
+                "",
+                f"HWM since TP2: {action.get('hwm')}",
+                f"ATR(14): {action.get('atr14')}",
+                f"Stop moved from {action.get('old_stop_price')} "
+                f"to {action.get('stop_price')} (HWM - 2×ATR).",
+                f"New stop order: {action.get('new_stop_order_id')}",
+            ])
+        return "\n".join([
+            f"⚠️ TRAIL-RAISE FAILED — {sym} (runner)",
+            "",
+            f"Error: {action.get('error')}",
+            "INTERVENE: runner protection may be compromised.",
+        ])
+
+    if kind == "runner_exit":
+        return "\n".join([
+            f"🏁 RUNNER EXIT — {sym}",
+            "",
+            f"Trigger: {action.get('trigger')}",
+            f"4H close {action.get('h4_close')} < EMA20 {action.get('h4_ema20')}",
+            f"Closed at market (qty {action.get('qty')}).",
+            f"Close order: {action.get('close_order_id') or 'FAILED'}",
+        ])
+
     if kind == "error":
         return f"⚠️ MANAGEMENT ERROR — {sym}\n\n{action.get('error')}"
 
     return f"Management action ({kind}) — {sym}: {action}"
+
+
+def format_lifecycle_lines(stats: dict) -> list[str]:
+    """Return a list of summary lines for the scan summary. Empty list
+    if there's nothing meaningful to show (no trades yet, or auto-execute
+    disabled).
+    """
+    if not stats or not stats.get("enabled"):
+        return []
+    if "error" in stats:
+        return ["", f"Lifecycle: fetch error ({stats['error']})"]
+    if stats["total_closed"] == 0 and stats["open_trades"] == 0:
+        return []
+
+    lines = ["", f"Lifecycle (last {stats['days_back']}d):"]
+    if stats["open_trades"]:
+        lines.append(f"  Open: {stats['open_trades']}")
+    if stats["total_closed"] > 0:
+        wr = stats["win_rate"] or 0.0
+        lines.append(
+            f"  Closed: {stats['total_closed']} "
+            f"({stats['wins']}W / {stats['losses']}L · {wr*100:.0f}% win-rate)"
+        )
+        lines.append(f"  Realized P&L: ${stats['total_pl_usd']:+.2f}")
+        if stats.get("mean_r") is not None:
+            lines.append(
+                f"  Mean R: {stats['mean_r']:+.2f}R "
+                f"(best {stats['best_r']:+.2f}R, worst {stats['worst_r']:+.2f}R)"
+            )
+        if stats.get("expectancy_warning"):
+            lines.append(f"  ⚠️ {stats['expectancy_warning']}")
+    return lines
 
 
 def format_scan_summary(
@@ -194,6 +254,7 @@ def format_scan_summary(
     next_scan_eat: str,
     run_kind: str = "primary",
     mgmt_actions: list[dict] | None = None,
+    lifecycle: dict | None = None,
 ) -> str:
     """End-of-run pulse message sent on every scan.
 
@@ -239,6 +300,9 @@ def format_scan_summary(
             kind = a.get("action", "?")
             sym = a.get("symbol", "?")
             lines.append(f"  - {kind} on {sym}")
+
+    lifecycle_lines = format_lifecycle_lines(lifecycle or {})
+    lines.extend(lifecycle_lines)
 
     if errors:
         lines.append("")

@@ -359,10 +359,41 @@ All Telegram alerts: every management action gets its own alert
 (STOP → BREAKEVEN, TIME STOP, REGIME EXIT, or STOP-MOVE FAILED). The
 scan summary also lists the management-action count and types.
 
-**Phase 5c (NOT YET BUILT):**
-- Trailing stop on the final 25% (after TP2 fills)
-- Persistent trade journal (per Crypto Strategy.md §"Trade journal")
-- Auto-expectancy calculation every 10 trades (per §"Expectancy check")
+**Phase 5c (LIVE) — runner phase + lifecycle stats:**
+
+When TP2 has filled (detected via two filled non-stop limit SELLs since
+position open), the position enters runner phase. Each scan applies:
+
+- **Runner exit:** if the latest CLOSED 4H bar's close is below the 4H
+  EMA20, cancel orders and market-close the runner. Telegram: 🏁 RUNNER
+  EXIT alert.
+- **Trail raise:** otherwise compute trail level = HWM − 2 × ATR(14),
+  where HWM is the max 4H high since the TP2 fill timestamp. If the
+  trail level exceeds the current stop, cancel old stop and place a
+  new stop-limit at the trail level. Stops never lower. Telegram:
+  📈 TRAIL RAISED alert.
+
+Each scan also appends a **Lifecycle (last 90d)** block to the scan
+summary, reconstructed statelessly from Alpaca's closed-orders history:
+- Open and closed trade count
+- Win rate
+- Realized P&L in USD
+- Mean R / best R / worst R (when the original stop is recoverable
+  from order history; works because "stops never widen" means the
+  lowest stop_price across a trade's stop_limit orders is the original)
+- After 30 closed trades, if mean R is below +0.2R, an explicit
+  "STOP the experiment" warning is added — matching the §"Expectancy
+  check" gate.
+
+**Intentionally NOT automated (human-in-loop required):**
+
+- The "lesson learned" note per trade in §"Trade journal". This requires
+  human judgment about what went right or wrong; the journal in this
+  conversation is the canonical place for those notes.
+- Manual overrides of any kind (early exits on news, sizing tweaks,
+  skipping a setup the watcher would have taken). If you want to
+  intervene, use Claude + MCP — but be aware the watcher will keep
+  scanning and may try to re-enter on the next qualifying cycle.
 
 ---
 

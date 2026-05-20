@@ -49,7 +49,10 @@ from alpaca.trading.requests import (
     StopLimitOrderRequest,
 )
 
+import pandas as pd
+
 from src.data import get_bars, get_client, get_latest_quote
+from src.indicators import add_indicators
 from src.strategy import classify_regime
 
 
@@ -68,6 +71,9 @@ _STOP_LIMIT_SLIPPAGE_PCT = 0.005   # stop_limit = stop * (1 - 0.5%) for SELL
 _FILL_POLL_TIMEOUT_SEC = 60
 _FILL_POLL_INTERVAL_SEC = 1
 _ENTRY_LOOKBACK_DAYS = 30          # how far back to search for the position-opening BUY
+_TRAIL_ATR_MULT = 2.0              # runner-phase trail: HWM - 2x 4H ATR(14)
+_LIFECYCLE_LOOKBACK_DAYS = 90      # window for lifecycle stats in scan summary
+_EXPECTANCY_MIN_R = 0.2            # below this mean R after 30 trades = stop experiment
 
 # Per-symbol qty rounding. Conservative — Alpaca crypto allows more
 # precision than this, but rounding down to these decimals avoids tiny
@@ -514,13 +520,19 @@ def _find_entry_fill_time(client, symbol_no_slash: str) -> Optional[datetime]:
     return filled_buys[0][0]
 
 
-def _detect_tp1_filled(client, symbol_no_slash: str, since: datetime) -> bool:
-    """Any filled limit SELL (excluding stop-limit) since `since`."""
+def _get_tp_fill_events(client, symbol_no_slash: str, since: datetime) -> list[dict]:
+    """Filled non-stop limit SELLs since `since`, sorted chronologically.
+    Each event: {"filled_at": datetime, "qty": float, "price": float}.
+
+    A non-empty list means TP1 has fired; len>=2 means TP2 has also fired
+    (runner phase).
+    """
     orders = client.get_orders(filter=GetOrdersRequest(
         status=QueryOrderStatus.CLOSED,
         symbols=[symbol_no_slash],
         after=since,
     ))
+    events: list[dict] = []
     for o in orders:
         if not _side_is(o, "sell"):
             continue
@@ -528,9 +540,16 @@ def _detect_tp1_filled(client, symbol_no_slash: str, since: datetime) -> bool:
         if "limit" not in otype or "stop" in otype:
             continue
         fq = getattr(o, "filled_qty", None)
-        if fq is not None and float(fq) > 0:
-            return True
-    return False
+        if fq is None or float(fq) <= 0:
+            continue
+        ts = getattr(o, "filled_at", None) or getattr(o, "updated_at", None)
+        events.append({
+            "filled_at": ts,
+            "qty": float(fq),
+            "price": float(getattr(o, "filled_avg_price", 0) or 0),
+        })
+    events.sort(key=lambda e: e["filled_at"] or datetime.min.replace(tzinfo=timezone.utc))
+    return events
 
 
 def _find_open_stop_orders(client, symbol_no_slash: str):
@@ -585,17 +604,19 @@ def _close_position_market(client, symbol: str, position, reason: str) -> dict:
     return out
 
 
-def _move_stop_to_breakeven(client, symbol: str, position, old_stop) -> dict:
-    """Cancel the original stop and place a new stop-limit at breakeven
-    (position.avg_entry_price) for the remaining qty.
+def _replace_stop(client, symbol: str, position, old_stop, new_stop_price: float) -> dict:
+    """Cancel `old_stop` and place a new stop-limit at `new_stop_price`
+    for the position's current qty. Shared by breakeven moves and trail
+    raises.
     """
-    avg_entry = float(position.avg_entry_price)
     qty = float(position.qty)
+    stop_px = round(new_stop_price, _PRICE_DECIMALS)
+    limit_px = round(new_stop_price * (1 - _STOP_LIMIT_SLIPPAGE_PCT), _PRICE_DECIMALS)
     out: dict = {
         "old_stop_order_id": str(old_stop.id),
         "old_stop_price": float(getattr(old_stop, "stop_price", 0) or 0),
         "new_stop_order_id": None,
-        "stop_price": round(avg_entry, _PRICE_DECIMALS),
+        "stop_price": stop_px,
         "qty": qty,
         "success": False,
         "error": None,
@@ -606,8 +627,6 @@ def _move_stop_to_breakeven(client, symbol: str, position, old_stop) -> dict:
         out["error"] = f"cancel old stop failed: {exc}"
         return out
 
-    stop_px = round(avg_entry, _PRICE_DECIMALS)
-    limit_px = round(avg_entry * (1 - _STOP_LIMIT_SLIPPAGE_PCT), _PRICE_DECIMALS)
     try:
         new_stop = client.submit_order(StopLimitOrderRequest(
             symbol=symbol,
@@ -627,13 +646,79 @@ def _move_stop_to_breakeven(client, symbol: str, position, old_stop) -> dict:
     return out
 
 
+def _move_stop_to_breakeven(client, symbol: str, position, old_stop) -> dict:
+    """Convenience wrapper: replace stop with one at position.avg_entry_price."""
+    avg_entry = float(position.avg_entry_price)
+    return _replace_stop(client, symbol, position, old_stop, avg_entry)
+
+
+def _runner_phase_action(client, symbol: str, position, tp_fill_events: list[dict]) -> Optional[dict]:
+    """Phase 2 (runner) management — applies once TP2 has filled.
+
+    Two parallel triggers per Crypto Strategy.md §"Stops, targets...":
+      A. Exit at market if the latest CLOSED 4H bar's close < 4H EMA20.
+      B. Otherwise raise the trail stop to HWM - 2 × ATR(14), where HWM
+         is the max 4H high since TP2 fill. Never lower the stop.
+    """
+    try:
+        h4_raw = get_bars(symbol, "4Hour", limit=250)
+    except Exception as exc:
+        return {"action": "error", "symbol": symbol, "error": f"4H bars fetch: {exc}"}
+    if len(h4_raw) < 30:
+        return None
+    h4 = add_indicators(h4_raw.iloc[:-1].copy())  # drop in-progress
+    last_bar = h4.iloc[-1]
+    close = float(last_bar["close"])
+    ema20 = float(last_bar["ema20"]) if pd.notna(last_bar["ema20"]) else None
+    atr14 = float(last_bar["atr14"]) if pd.notna(last_bar["atr14"]) else None
+
+    # Trigger A — 4H close < EMA20 exits the runner
+    if ema20 is not None and close < ema20:
+        result = _close_position_market(
+            client, symbol, position,
+            reason=f"runner exit: 4H close {close:.4f} < EMA20 {ema20:.4f}",
+        )
+        return {"action": "runner_exit", "symbol": symbol,
+                "trigger": "4H close < EMA20",
+                "h4_close": close, "h4_ema20": ema20, **result}
+
+    # Trigger B — raise trail
+    if atr14 is None:
+        return None
+    tp_times = sorted(e["filled_at"] for e in tp_fill_events if e.get("filled_at"))
+    if len(tp_times) < 2:
+        return None
+    tp2_time = tp_times[-1]
+    try:
+        bars_since = h4[h4.index >= tp2_time]
+    except TypeError:
+        return None  # timezone mismatch — bail rather than misbehave
+    if bars_since.empty:
+        return None
+    hwm = float(bars_since["high"].max())
+    new_trail = hwm - _TRAIL_ATR_MULT * atr14
+
+    stop_orders = _find_open_stop_orders(client, _alpaca_position_symbol(symbol))
+    if not stop_orders:
+        return {"action": "error", "symbol": symbol,
+                "error": f"runner has no open stop order; calculated trail {new_trail:.4f} — INTERVENE"}
+    current_stop = stop_orders[0]
+    current_stop_px = float(getattr(current_stop, "stop_price", 0) or 0)
+    if new_trail <= current_stop_px:
+        return None  # never lower
+
+    rep = _replace_stop(client, symbol, position, current_stop, new_trail)
+    return {"action": "trail_raise", "symbol": symbol,
+            "hwm": hwm, "atr14": atr14, **rep}
+
+
 def manage_open_positions() -> list[dict]:
     """Run the in-trade management rules over all open positions.
 
     Returns a list of action dicts. Each dict has at minimum:
         {"action": <str>, "symbol": <slashed symbol>, ...}
     Possible actions: "regime_close", "time_stop", "breakeven_move",
-    "error".
+    "trail_raise", "runner_exit", "error".
 
     No-ops (nothing to do for this position) produce no entry.
     """
@@ -652,7 +737,7 @@ def manage_open_positions() -> list[dict]:
         symbol_no_slash = getattr(position, "symbol", "")
         symbol = _slashed(symbol_no_slash)
         try:
-            # Priority 1 — regime exit
+            # Priority 1 — regime exit (always applies)
             try:
                 daily = get_bars(symbol, "1Day", limit=250)
                 daily_closed = daily.iloc[:-1] if len(daily) > 0 else daily
@@ -664,31 +749,35 @@ def manage_open_positions() -> list[dict]:
             if regime == "BEARISH":
                 result = _close_position_market(
                     client, symbol, position,
-                    reason="daily regime flipped BEARISH"
+                    reason="daily regime flipped BEARISH",
                 )
                 actions.append({"action": "regime_close", "symbol": symbol,
                                 "regime": regime, **result})
                 continue
 
-            # Priority 2 — time stop
+            # Detect phase from TP fill history
             entry_at = _find_entry_fill_time(client, symbol_no_slash)
-            tp1_filled = (
-                _detect_tp1_filled(client, symbol_no_slash, entry_at)
-                if entry_at is not None else False
+            tp_events = (
+                _get_tp_fill_events(client, symbol_no_slash, entry_at)
+                if entry_at is not None else []
             )
-            if entry_at is not None:
-                age_days = (datetime.now(timezone.utc) - entry_at).total_seconds() / 86400
-                if age_days > _TIME_STOP_DAYS and not tp1_filled:
-                    result = _close_position_market(
-                        client, symbol, position,
-                        reason=f"time stop (age {age_days:.1f}d, TP1 not hit)"
-                    )
-                    actions.append({"action": "time_stop", "symbol": symbol,
-                                    "age_days": age_days, **result})
-                    continue
+            tp_count = len(tp_events)
 
-            # Priority 3 — TP1-fired → breakeven move
-            if tp1_filled:
+            if tp_count == 0:
+                # Phase 0 — time stop
+                if entry_at is not None:
+                    age_days = (datetime.now(timezone.utc) - entry_at).total_seconds() / 86400
+                    if age_days > _TIME_STOP_DAYS:
+                        result = _close_position_market(
+                            client, symbol, position,
+                            reason=f"time stop (age {age_days:.1f}d, TP1 not hit)",
+                        )
+                        actions.append({"action": "time_stop", "symbol": symbol,
+                                        "age_days": age_days, **result})
+                continue
+
+            if tp_count == 1:
+                # Phase 1 — breakeven move (idempotent: skips if stop already moved)
                 stop_orders = _find_open_stop_orders(client, symbol_no_slash)
                 avg_entry = float(position.avg_entry_price)
                 for stop in stop_orders:
@@ -698,7 +787,165 @@ def manage_open_positions() -> list[dict]:
                         actions.append({"action": "breakeven_move", "symbol": symbol,
                                         "avg_entry_price": avg_entry, **be})
                         break
+                continue
+
+            # tp_count >= 2 → Phase 2 (runner)
+            runner_action = _runner_phase_action(client, symbol, position, tp_events)
+            if runner_action is not None:
+                actions.append(runner_action)
         except Exception as exc:
             actions.append({"action": "error", "symbol": symbol, "error": str(exc)})
 
     return actions
+
+
+# =========================================================================
+# Phase 5c — lifecycle reconstruction & expectancy stats
+# =========================================================================
+#
+# Stateless — every scan walks Alpaca's closed-orders history fresh and
+# reconstructs trade objects. No journal file is persisted; the strategy
+# doc's per-trade "lesson learned" notes are intentionally not automated
+# (they require human judgment). Aggregate stats are appended to the scan
+# summary so the math is visible on every run.
+
+
+def _trade_walk_for_symbol(orders_sorted: list) -> list[dict]:
+    """Walk a single symbol's CLOSED orders (chronological) and produce
+    trade objects. A trade opens on filled BUY and closes when sold qty
+    matches the entry qty (or when a new BUY arrives — defensive).
+    """
+    trades: list[dict] = []
+    current: Optional[dict] = None
+    for o in orders_sorted:
+        otype = _order_type_str(o)
+        fq = float(getattr(o, "filled_qty", 0) or 0)
+        fp = float(getattr(o, "filled_avg_price", 0) or 0)
+        stop_px = float(getattr(o, "stop_price", 0) or 0)
+
+        if _side_is(o, "buy") and fq > 0:
+            if current is not None:
+                trades.append(current)
+            current = {
+                "symbol": getattr(o, "symbol", ""),
+                "entry_at": getattr(o, "filled_at", None),
+                "entry_qty": fq,
+                "entry_price": fp,
+                "qty_remaining": fq,
+                "exits": [],
+                "stops_seen": [],
+            }
+            continue
+
+        if current is None:
+            continue
+
+        if "stop" in otype and _side_is(o, "sell"):
+            if stop_px > 0:
+                current["stops_seen"].append(stop_px)
+            if fq > 0:
+                current["exits"].append({"qty": fq, "price": fp, "reason": "STOP"})
+                current["qty_remaining"] -= fq
+        elif _side_is(o, "sell") and "limit" in otype:
+            if fq > 0:
+                current["exits"].append({"qty": fq, "price": fp, "reason": "TP"})
+                current["qty_remaining"] -= fq
+        elif _side_is(o, "sell") and fq > 0:
+            current["exits"].append({"qty": fq, "price": fp, "reason": "MGMT_CLOSE"})
+            current["qty_remaining"] -= fq
+
+        if current["qty_remaining"] < current["entry_qty"] * 0.01:
+            trades.append(current)
+            current = None
+
+    if current is not None:
+        trades.append(current)
+    return trades
+
+
+def summarize_lifecycle(days_back: int = _LIFECYCLE_LOOKBACK_DAYS) -> dict:
+    """Reconstruct closed trades from Alpaca order history and compute
+    aggregate stats: total closed, win rate, realized P&L in USD, mean R
+    (where the original stop is recoverable from order history).
+
+    Stateless — runs each scan. Cheap (one orders fetch).
+    """
+    if not auto_execute_enabled():
+        return {"enabled": False}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+    client = get_client()
+    try:
+        closed_orders = client.get_orders(filter=GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED,
+            after=cutoff,
+            limit=500,
+        ))
+    except Exception as exc:
+        print(f"[trader] lifecycle: order fetch failed: {exc}", file=sys.stderr)
+        return {"enabled": True, "error": str(exc), "days_back": days_back}
+
+    by_symbol: dict[str, list] = {}
+    for o in closed_orders:
+        sym = getattr(o, "symbol", None)
+        if sym:
+            by_symbol.setdefault(sym, []).append(o)
+
+    def _ts(o):
+        return (
+            getattr(o, "submitted_at", None)
+            or getattr(o, "created_at", None)
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+
+    all_trades: list[dict] = []
+    for sym, orders in by_symbol.items():
+        orders.sort(key=_ts)
+        all_trades.extend(_trade_walk_for_symbol(orders))
+
+    closed = [t for t in all_trades if t["qty_remaining"] < t["entry_qty"] * 0.01]
+    open_trades = len(all_trades) - len(closed)
+
+    stats: dict = {
+        "enabled": True,
+        "days_back": days_back,
+        "total_closed": len(closed),
+        "open_trades": open_trades,
+        "wins": 0,
+        "losses": 0,
+        "total_pl_usd": 0.0,
+        "win_rate": None,
+        "mean_r": None,
+        "best_r": None,
+        "worst_r": None,
+        "expectancy_warning": None,
+    }
+    r_multiples: list[float] = []
+    for t in closed:
+        entry_value = t["entry_qty"] * t["entry_price"]
+        exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
+        pl = exit_value - entry_value
+        stats["total_pl_usd"] += pl
+        if pl > 0:
+            stats["wins"] += 1
+        else:
+            stats["losses"] += 1
+        if t["stops_seen"]:
+            # Stops never widen by strategy rule, so min() is the original.
+            orig_stop = min(t["stops_seen"])
+            risk_per_unit = t["entry_price"] - orig_stop
+            if risk_per_unit > 0:
+                r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
+
+    if stats["total_closed"] > 0:
+        stats["win_rate"] = stats["wins"] / stats["total_closed"]
+    if r_multiples:
+        stats["mean_r"] = sum(r_multiples) / len(r_multiples)
+        stats["best_r"] = max(r_multiples)
+        stats["worst_r"] = min(r_multiples)
+        if stats["total_closed"] >= 30 and stats["mean_r"] < _EXPECTANCY_MIN_R:
+            stats["expectancy_warning"] = (
+                f"mean R {stats['mean_r']:+.2f} below +{_EXPECTANCY_MIN_R}R after "
+                f"{stats['total_closed']} trades — strategy doc says STOP the experiment"
+            )
+    return stats

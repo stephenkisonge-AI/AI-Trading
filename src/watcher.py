@@ -29,6 +29,7 @@ from src.trader import (
     check_safety_gates,
     manage_open_positions,
     place_entry_bundle,
+    summarize_lifecycle,
 )
 
 SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
@@ -240,11 +241,20 @@ def main() -> int:
             print(f"[watcher] ERROR scanning {symbol}: {exc}\n{tb}", file=sys.stderr)
             errors.append(f"{symbol}: {exc}")
 
+    lifecycle_stats: dict = {}
+    if auto_exec:
+        try:
+            lifecycle_stats = summarize_lifecycle()
+            print(f"[watcher] lifecycle: {lifecycle_stats}")
+        except Exception as exc:
+            print(f"[watcher] lifecycle summary failed: {exc}", file=sys.stderr)
+
     next_scan_eat = _next_scan_eat(run_started)
     run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")
     summary_msg = format_scan_summary(
         scan_results, errors, run_started, next_scan_eat,
         run_kind=run_kind, mgmt_actions=mgmt_actions,
+        lifecycle=lifecycle_stats,
     )
     sent = send_alert(summary_msg)
     print(f"[watcher] sent end-of-run summary (kind={run_kind}): {sent}")
