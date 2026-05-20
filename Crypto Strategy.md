@@ -18,8 +18,14 @@ back to me before we trade. If anything is ambiguous, ask.
   take-profit, position size, and a written thesis.
 - **Capital preservation > capital growth.** A skipped trade is free.
   A bad trade isn't.
-- **Confirmation gate:** You never place an order without showing me the
-  full proposal and getting an explicit 'go' from me. Every single time.
+- **Confirmation gate:** In LIVE mode, you never place an order without
+  showing me the full proposal and getting an explicit 'go' from me.
+  Every single time. In PAPER mode, the gate can be bypassed by setting
+  `WATCHER_AUTO_EXECUTE=true` so the GitHub-Actions watcher executes
+  qualifying setups on its own — the mechanical 8-condition checklist
+  IS the gate. The flag is honored only when `ALPACA_PAPER_TRADE=True`;
+  live mode auto-execute is hard-refused in code. See §"Paper auto-execution
+  mode" below for what runs automatically and what is still deferred.
 
 ---
 
@@ -306,6 +312,40 @@ After 'go':
 - Week's running P&L vs the -5% cap
 - Any rule violations, skipped setups, missed setups, or API issues
 - One-line read on regime: "Still bullish" / "Weakening" / "Flipped"
+
+---
+
+## Paper auto-execution mode
+
+Activated by setting `WATCHER_AUTO_EXECUTE=true` in GitHub Secrets.
+Hard-refused unless `ALPACA_PAPER_TRADE=True` (live trading is never
+automated). When active, the GitHub-Actions watcher does the full entry
+sequence on its own — no Claude session required.
+
+**Phase 5a (LIVE):**
+- Watcher detects a qualifying 8/8 setup
+- Pre-execution safety gates run: daily loss cap, max positions,
+  already-holding-this-symbol, BTC/ETH correlation rule, 1-entry/day cap
+- If any gate fails: silent skip with reason logged in the scan summary
+- Otherwise: market entry → wait for fill → stop-limit + TP1 + TP2 placed
+  immediately as resting GTC orders on Alpaca
+- Telegram alert on every action (setup found, entry placed, errors)
+- If protective orders fail after fill: urgent "INTERVENE" alert
+
+**Phase 5b (NOT YET BUILT — manual until then):**
+- Detect TP1 fills → cancel original stop, place new stop at breakeven
+- 10-day time stop → market close at market
+- Hard regime exit when daily flips bearish → close all positions
+- Spread/quote-staleness no-trade conditions
+- Weekly loss cap and rolling -10% equity drawdown gate
+
+**Phase 5c (NOT YET BUILT):**
+- Trailing stop on the final 25%
+- Persistent trade journal
+- Auto-expectancy calculation every 10 trades
+
+Until 5b ships, you still need to open Claude periodically (or watch
+Telegram) to manage open positions. Phase 5a only handles entries.
 
 ---
 

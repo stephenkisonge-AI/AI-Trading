@@ -42,12 +42,12 @@ def send_alert(message: str) -> bool:
         return False
 
 
-def format_setup_alert(result: dict, regime: str) -> str:
+def format_setup_alert(result: dict, regime: str, auto_execute: bool = False) -> str:
     """Build the Telegram message for a qualifying setup result.
 
-    The format mirrors the example in build-watcher-system.md §3.4: setup
-    label, regime tag, 8/8 condition checklist, suggested entry/stop/TPs,
-    instruction to confirm via Claude Code + MCP.
+    When `auto_execute` is True, the footer line tells the user the
+    watcher will attempt execution on its own (a follow-up "ENTRY
+    PLACED" or "ENTRY BLOCKED" alert will land shortly).
     """
     setup_name = "Pullback" if result["setup"] == "A" else "Breakout Retest"
     header = f"🔔 SETUP QUALIFIED — {result['symbol']} (Setup {result['setup']} — {setup_name})"
@@ -79,12 +79,54 @@ def format_setup_alert(result: dict, regime: str) -> str:
             stop_dist_atr = (entry - stop) / atr
             levels_lines.append(f"Stop dist: {stop_dist_atr:.2f}x 4H ATR(14)")
 
-    footer = [
-        "",
-        "→ Open Claude Code → ask the Alpaca MCP to confirm and execute.",
-    ]
+    if auto_execute:
+        footer = ["", "→ Auto-execute is ON. Bundle order incoming."]
+    else:
+        footer = ["", "→ Open Claude Code → ask the Alpaca MCP to confirm and execute."]
 
     return "\n".join([header, ""] + checklist_lines + levels_lines + footer)
+
+
+def format_entry_placed(symbol: str, setup: str, exec_result: dict) -> str:
+    """Telegram message confirming an auto-execution bundle was placed."""
+    filled_qty = exec_result.get("entry_filled_qty")
+    filled_avg = exec_result.get("entry_filled_avg_price")
+    notional = (filled_qty * filled_avg) if (filled_qty and filled_avg) else None
+    complete = exec_result.get("protective_orders_complete")
+    icon = "📥" if complete else "⚠️"
+    suffix = "" if complete else " — PROTECTIVE ORDERS INCOMPLETE"
+
+    lines = [
+        f"{icon} ENTRY PLACED — {symbol} (Setup {setup}){suffix}",
+        "",
+        f"Filled qty:  {filled_qty}",
+        f"Avg price:   {filled_avg}",
+        f"Notional:    ${notional:.2f}" if notional is not None else "Notional:    n/a",
+        "",
+        f"Stop:        {exec_result.get('stop_price')} "
+        f"(order_id: {exec_result.get('stop_order_id') or 'FAILED'})",
+        f"TP1 (+1.5R): {exec_result.get('tp1_price')} "
+        f"(order_id: {exec_result.get('tp1_order_id') or 'FAILED'})",
+        f"TP2 (+3R):   {exec_result.get('tp2_price')} "
+        f"(order_id: {exec_result.get('tp2_order_id') or 'FAILED'})",
+    ]
+    if exec_result.get("errors"):
+        lines.append("")
+        lines.append("Errors:")
+        for e in exec_result["errors"]:
+            lines.append(f"  - {e}")
+        if not complete:
+            lines.append("")
+            lines.append("⚠️ INTERVENE: position is open but protective coverage is partial.")
+    return "\n".join(lines)
+
+
+def format_entry_blocked(symbol: str, setup: str, reason: str) -> str:
+    """Telegram message when a qualified setup was blocked at a safety
+    gate. Currently NOT sent as its own alert (per Phase 5a scoping —
+    silent skip). Included here so the scan summary can render it.
+    """
+    return f"🚫 ENTRY BLOCKED — {symbol} (Setup {setup}): {reason}"
 
 
 def format_scan_summary(
@@ -127,6 +169,9 @@ def format_scan_summary(
             lines.append(f"• {sym} — {regime} · {tags}")
         else:
             lines.append(f"• {sym} — {regime} · no entry")
+        # Per-symbol execution outcome (auto-execute mode only)
+        for note in r.get("execution_notes", []):
+            lines.append(f"   ↳ {note}")
 
     if errors:
         lines.append("")
@@ -137,7 +182,7 @@ def format_scan_summary(
     lines.append("")
     lines.append(f"Next scan: {next_scan_eat}")
     if any_qualified:
-        lines.append("→ See detailed alert(s) above. Confirm via Claude Code + Alpaca MCP before placing.")
+        lines.append("→ See detailed alert(s) above.")
     elif not errors:
         lines.append("Long-only spec → no action while bearish.")
 

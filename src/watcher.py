@@ -16,8 +16,18 @@ from dotenv import load_dotenv
 
 from src.data import _assert_paper_mode, get_bars, get_positions
 from src.indicators import add_indicators
-from src.notifier import format_scan_summary, format_setup_alert, send_alert
+from src.notifier import (
+    format_entry_placed,
+    format_scan_summary,
+    format_setup_alert,
+    send_alert,
+)
 from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
+from src.trader import (
+    auto_execute_enabled,
+    check_safety_gates,
+    place_entry_bundle,
+)
 
 SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
 
@@ -124,11 +134,15 @@ def main() -> int:
         )
         return 0
 
+    auto_exec = auto_execute_enabled()
+    print(f"[watcher] auto-execute enabled: {auto_exec}")
+
     errors: list[str] = []
     scan_results: list[dict] = []
     for symbol in SYMBOLS:
         try:
             result = _scan_symbol(symbol, positions)
+            result["execution_notes"] = []
             scan_results.append(result)
             summary = (
                 f"[watcher] {symbol}: regime={result['regime']} "
@@ -139,12 +153,64 @@ def main() -> int:
             print(summary)
 
             for setup_result in (result["setup_a"], result["setup_b"]):
-                if setup_result["qualified"]:
-                    message = format_setup_alert(setup_result, result["regime"])
-                    sent = send_alert(message)
-                    print(
-                        f"[watcher] sent alert for {symbol} Setup {setup_result['setup']}: {sent}"
+                if not setup_result["qualified"]:
+                    continue
+
+                message = format_setup_alert(
+                    setup_result, result["regime"], auto_execute=auto_exec
+                )
+                sent = send_alert(message)
+                print(
+                    f"[watcher] sent setup alert for {symbol} "
+                    f"Setup {setup_result['setup']}: {sent}"
+                )
+
+                if not auto_exec:
+                    continue
+
+                # Auto-execution path: safety gates → place bundle → alert
+                gate = check_safety_gates(symbol)
+                if not gate.allowed:
+                    note = f"Setup {setup_result['setup']} blocked: {gate.reason}"
+                    print(f"[watcher] {symbol}: {note}")
+                    result["execution_notes"].append(note)
+                    continue
+
+                entry = setup_result["entry"]
+                stop = setup_result["stop"]
+                tp1 = entry + 1.5 * (entry - stop)
+                tp2 = entry + 3.0 * (entry - stop)
+                exec_result = place_entry_bundle(
+                    symbol=symbol,
+                    entry_price_hint=entry,
+                    stop_price=stop,
+                    tp1_price=tp1,
+                    tp2_price=tp2,
+                )
+
+                if exec_result["entry_filled_qty"] is None:
+                    note = (
+                        f"Setup {setup_result['setup']} execution FAILED before fill: "
+                        f"{'; '.join(exec_result['errors']) or 'unknown'}"
                     )
+                    print(f"[watcher] {symbol}: {note}", file=sys.stderr)
+                    result["execution_notes"].append(note)
+                    send_alert(
+                        f"⚠️ ENTRY FAILED — {symbol} (Setup {setup_result['setup']})\n\n"
+                        f"{'; '.join(exec_result['errors']) or 'no details'}"
+                    )
+                    continue
+
+                placed_msg = format_entry_placed(symbol, setup_result["setup"], exec_result)
+                send_alert(placed_msg)
+                note = (
+                    f"Setup {setup_result['setup']} EXECUTED: "
+                    f"qty={exec_result['entry_filled_qty']} "
+                    f"@ {exec_result['entry_filled_avg_price']} "
+                    f"(protective_complete={exec_result['protective_orders_complete']})"
+                )
+                print(f"[watcher] {symbol}: {note}")
+                result["execution_notes"].append(note)
         except Exception as exc:
             tb = traceback.format_exc()
             print(f"[watcher] ERROR scanning {symbol}: {exc}\n{tb}", file=sys.stderr)

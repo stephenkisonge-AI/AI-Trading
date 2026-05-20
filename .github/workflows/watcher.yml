@@ -75,3 +75,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WATCHER_RUN_KIND: ${{ github.event.schedule == '0 14 * * *' && 'fallback' || 'primary' }}
+          # Phase 5a kill switch: set this GitHub Secret to "true" to enable
+          # auto-execution of qualifying setups. Anything else (unset, "false",
+          # etc.) keeps the watcher in alerts-only mode. Auto-execute also
+          # requires ALPACA_PAPER_TRADE=True — live trading is never automated.
+          WATCHER_AUTO_EXECUTE: ${{ secrets.WATCHER_AUTO_EXECUTE }}
