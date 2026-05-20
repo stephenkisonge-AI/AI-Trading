@@ -18,6 +18,7 @@ from src.data import _assert_paper_mode, get_bars, get_positions
 from src.indicators import add_indicators
 from src.notifier import (
     format_entry_placed,
+    format_management_action,
     format_scan_summary,
     format_setup_alert,
     send_alert,
@@ -26,6 +27,7 @@ from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
 from src.trader import (
     auto_execute_enabled,
     check_safety_gates,
+    manage_open_positions,
     place_entry_bundle,
 )
 
@@ -137,6 +139,28 @@ def main() -> int:
     auto_exec = auto_execute_enabled()
     print(f"[watcher] auto-execute enabled: {auto_exec}")
 
+    # Phase 5b — manage open positions BEFORE the entry pass so any closes
+    # free up position slots in time for the entry-side safety gates.
+    mgmt_actions: list[dict] = []
+    if auto_exec:
+        try:
+            mgmt_actions = manage_open_positions()
+            for action in mgmt_actions:
+                print(f"[watcher] mgmt action: {action}")
+                send_alert(format_management_action(action))
+            if mgmt_actions:
+                # Refresh positions list — some may have just closed.
+                try:
+                    positions = get_positions()
+                    print(f"[watcher] positions refreshed after mgmt: {len(positions)}")
+                except Exception as exc:
+                    print(f"[watcher] FAILED to refresh positions after mgmt: {exc}",
+                          file=sys.stderr)
+        except Exception as exc:
+            tb = traceback.format_exc()
+            print(f"[watcher] mgmt pass crashed: {exc}\n{tb}", file=sys.stderr)
+            send_alert(f"⚠️ Management pass crashed: {exc}")
+
     errors: list[str] = []
     scan_results: list[dict] = []
     for symbol in SYMBOLS:
@@ -219,7 +243,8 @@ def main() -> int:
     next_scan_eat = _next_scan_eat(run_started)
     run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")
     summary_msg = format_scan_summary(
-        scan_results, errors, run_started, next_scan_eat, run_kind=run_kind
+        scan_results, errors, run_started, next_scan_eat,
+        run_kind=run_kind, mgmt_actions=mgmt_actions,
     )
     sent = send_alert(summary_msg)
     print(f"[watcher] sent end-of-run summary (kind={run_kind}): {sent}")

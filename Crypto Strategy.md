@@ -322,30 +322,47 @@ Hard-refused unless `ALPACA_PAPER_TRADE=True` (live trading is never
 automated). When active, the GitHub-Actions watcher does the full entry
 sequence on its own — no Claude session required.
 
-**Phase 5a (LIVE):**
+**Phase 5a (LIVE) — auto-entry:**
 - Watcher detects a qualifying 8/8 setup
-- Pre-execution safety gates run: daily loss cap, max positions,
-  already-holding-this-symbol, BTC/ETH correlation rule, 1-entry/day cap
+- Pre-execution safety gates run (all listed below under 5b additions too)
 - If any gate fails: silent skip with reason logged in the scan summary
 - Otherwise: market entry → wait for fill → stop-limit + TP1 + TP2 placed
   immediately as resting GTC orders on Alpaca
 - Telegram alert on every action (setup found, entry placed, errors)
 - If protective orders fail after fill: urgent "INTERVENE" alert
 
-**Phase 5b (NOT YET BUILT — manual until then):**
-- Detect TP1 fills → cancel original stop, place new stop at breakeven
-- 10-day time stop → market close at market
-- Hard regime exit when daily flips bearish → close all positions
-- Spread/quote-staleness no-trade conditions
-- Weekly loss cap and rolling -10% equity drawdown gate
+**Phase 5b (LIVE) — in-trade management + remaining gates:**
+
+Management pass runs at the TOP of every scan, before the entry pass,
+so any closes free up position slots before entries are considered.
+For each open position, in priority order:
+1. **Regime exit** — if THIS symbol's daily regime classifies BEARISH,
+   cancel all open orders and close at market. (Interpreted per-symbol:
+   BTC flipping bearish doesn't auto-close ETH. Each position lives or
+   dies by its own daily.)
+2. **Time stop** — if position is >10 days old AND TP1 has not filled,
+   cancel orders and close at market.
+3. **Breakeven move** — if TP1 has filled (detected via filled limit
+   sells since position open) but the open stop is still at its
+   original loss-side level, cancel old stop and place a new stop-limit
+   at avg_entry_price for remaining qty.
+
+Pre-execution gates added in 5b (on top of 5a's daily-loss / position-cap
+/ daily-entry gates):
+- **Spread cap** — skip if bid/ask spread > 0.5%
+- **Weekly loss cap** — skip if portfolio history shows week-to-date
+  PnL ≤ -5% of week-start equity
+- **Rolling drawdown gate** — skip if current equity is ≤ -10% from
+  the 30-day equity peak (per portfolio history)
+
+All Telegram alerts: every management action gets its own alert
+(STOP → BREAKEVEN, TIME STOP, REGIME EXIT, or STOP-MOVE FAILED). The
+scan summary also lists the management-action count and types.
 
 **Phase 5c (NOT YET BUILT):**
-- Trailing stop on the final 25%
-- Persistent trade journal
-- Auto-expectancy calculation every 10 trades
-
-Until 5b ships, you still need to open Claude periodically (or watch
-Telegram) to manage open positions. Phase 5a only handles entries.
+- Trailing stop on the final 25% (after TP2 fills)
+- Persistent trade journal (per Crypto Strategy.md §"Trade journal")
+- Auto-expectancy calculation every 10 trades (per §"Expectancy check")
 
 ---
 

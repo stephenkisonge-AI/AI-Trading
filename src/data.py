@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
-from alpaca.data.requests import CryptoBarsRequest
+from alpaca.data.requests import CryptoBarsRequest, CryptoLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import QueryOrderStatus
@@ -109,3 +109,14 @@ def get_open_orders(symbol: Optional[str] = None):
     if symbol is not None:
         request_kwargs["symbols"] = [symbol]
     return get_client().get_orders(filter=GetOrdersRequest(**request_kwargs))
+
+
+def get_latest_quote(symbol: str):
+    """Latest bid/ask for a crypto pair. Raises on missing/empty data."""
+    client = _get_crypto_data_client()
+    quotes = client.get_crypto_latest_quote(
+        CryptoLatestQuoteRequest(symbol_or_symbols=[symbol])
+    )
+    if symbol not in quotes:
+        raise RuntimeError(f"No quote returned for {symbol}")
+    return quotes[symbol]

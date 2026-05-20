@@ -129,12 +129,71 @@ def format_entry_blocked(symbol: str, setup: str, reason: str) -> str:
     return f"🚫 ENTRY BLOCKED — {symbol} (Setup {setup}): {reason}"
 
 
+def format_management_action(action: dict) -> str:
+    """Telegram message for one in-trade management action (Phase 5b)."""
+    sym = action.get("symbol", "?")
+    kind = action.get("action")
+
+    if kind == "regime_close":
+        body = [
+            f"🚨 REGIME EXIT — {sym}",
+            "",
+            f"Daily regime flipped {action.get('regime')}.",
+            f"Closed at market (qty {action.get('qty')}).",
+            f"Close order: {action.get('close_order_id') or 'FAILED'}",
+        ]
+        if action.get("cancelled_orders"):
+            body.append(f"Cancelled {len(action['cancelled_orders'])} open order(s) first.")
+        if action.get("error"):
+            body.append(f"⚠️ {action['error']}")
+        return "\n".join(body)
+
+    if kind == "time_stop":
+        body = [
+            f"⏰ TIME STOP — {sym}",
+            "",
+            f"Position aged {action.get('age_days'):.1f} days without TP1.",
+            f"Closed at market (qty {action.get('qty')}).",
+            f"Close order: {action.get('close_order_id') or 'FAILED'}",
+        ]
+        if action.get("cancelled_orders"):
+            body.append(f"Cancelled {len(action['cancelled_orders'])} open order(s) first.")
+        if action.get("error"):
+            body.append(f"⚠️ {action['error']}")
+        return "\n".join(body)
+
+    if kind == "breakeven_move":
+        if action.get("success"):
+            return "\n".join([
+                f"🔄 STOP → BREAKEVEN — {sym}",
+                "",
+                f"TP1 detected as filled. Remaining qty {action.get('qty')}.",
+                f"Stop moved from {action.get('old_stop_price')} "
+                f"to {action.get('stop_price')} (entry avg).",
+                f"New stop order: {action.get('new_stop_order_id')}",
+            ])
+        return "\n".join([
+            f"⚠️ STOP-MOVE FAILED — {sym}",
+            "",
+            "TP1 filled but couldn't move stop to breakeven.",
+            f"Error: {action.get('error')}",
+            "",
+            "INTERVENE: position protection may be compromised.",
+        ])
+
+    if kind == "error":
+        return f"⚠️ MANAGEMENT ERROR — {sym}\n\n{action.get('error')}"
+
+    return f"Management action ({kind}) — {sym}: {action}"
+
+
 def format_scan_summary(
     scan_results: list[dict],
     errors: list[str],
     run_started,
     next_scan_eat: str,
     run_kind: str = "primary",
+    mgmt_actions: list[dict] | None = None,
 ) -> str:
     """End-of-run pulse message sent on every scan.
 
@@ -172,6 +231,14 @@ def format_scan_summary(
         # Per-symbol execution outcome (auto-execute mode only)
         for note in r.get("execution_notes", []):
             lines.append(f"   ↳ {note}")
+
+    if mgmt_actions:
+        lines.append("")
+        lines.append(f"Management actions this scan: {len(mgmt_actions)}")
+        for a in mgmt_actions:
+            kind = a.get("action", "?")
+            sym = a.get("symbol", "?")
+            lines.append(f"  - {kind} on {sym}")
 
     if errors:
         lines.append("")
