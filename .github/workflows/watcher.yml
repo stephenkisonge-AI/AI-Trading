@@ -1,12 +1,16 @@
-name: Daily Watcher
+name: Watcher
 
 on:
   schedule:
-    # Primary: 04:17 UTC = 07:17 EAT (Nairobi). Off-the-hour minute to
-    # dodge GitHub Actions free-tier scheduler lag at the top of the hour.
-    - cron: '17 4 * * *'
-    # Fallback: 14:00 UTC = 17:00 EAT. Runs only if today's primary did
-    # NOT complete successfully — guarded below via gh api lookup.
+    # Primary: every 4 hours at :17 UTC (00:17, 04:17, 08:17, 12:17,
+    # 16:17, 20:17). Aligned with the strategy's 4H setup-confirmation
+    # timeframe so each scan sees a freshly-closed 4H candle. Off-the-hour
+    # minute dodges GitHub Actions free-tier scheduler lag at :00.
+    - cron: '17 */4 * * *'
+    # Fallback: 14:00 UTC = 17:00 EAT. Fires only if NO scheduled run
+    # succeeded earlier today — guarded below via gh api lookup. With 6
+    # primary scans/day this almost always skips; it exists to cover the
+    # (rare) day when free-tier scheduler drops every single one.
     - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
