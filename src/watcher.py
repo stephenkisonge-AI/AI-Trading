@@ -1,6 +1,6 @@
-"""Daily watcher entry point. Runs once per day on GitHub Actions at
-03:02 UTC (06:02 EAT), evaluates Setup A and Setup B on closed bars for
-each symbol, and pings Telegram only when something qualifies.
+"""Watcher entry point. Runs every 4 hours on GitHub Actions (at :17 of
+00, 04, 08, 12, 16, 20 UTC), evaluates Setup A and Setup B on closed
+bars for each symbol, and pings Telegram only when something qualifies.
 
 Never places orders. Trade execution always goes through Claude Code +
 Alpaca MCP with manual confirmation.
@@ -19,25 +19,36 @@ from src.indicators import add_indicators
 from src.notifier import format_scan_summary, format_setup_alert, send_alert
 from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
 
-SYMBOLS = ["BTC/USD", "ETH/USD"]
+SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
 
-# Cron schedule: 04:17 UTC daily (see .github/workflows/watcher.yml).
-# Keep these in sync if the cron changes — they drive the "next scan" line
-# in the Telegram summary.
-_CRON_UTC_HOUR = 4
+# Cron schedule: every 4 hours at :17 UTC (see .github/workflows/watcher.yml).
+# Keep these in sync with the cron — they drive the "next scan" line in the
+# Telegram summary.
+_CRON_UTC_HOURS = (0, 4, 8, 12, 16, 20)
 _CRON_UTC_MINUTE = 17
 _NAIROBI = timezone(timedelta(hours=3))
 
 
 def _next_scan_eat(run_started_utc: datetime) -> str:
-    """Format the next scheduled scan time as Nairobi-local. The watcher
-    only completes after the cron has fired, so the next firing is always
-    the following day's slot.
+    """Format the next scheduled scan time as Nairobi-local. Finds the
+    next 4-hourly :17 slot after `run_started_utc`; rolls to tomorrow's
+    first slot if today's are all in the past.
     """
-    today_slot = run_started_utc.replace(
-        hour=_CRON_UTC_HOUR, minute=_CRON_UTC_MINUTE, second=0, microsecond=0
-    )
-    next_utc = today_slot if run_started_utc < today_slot else today_slot + timedelta(days=1)
+    today_slots = [
+        run_started_utc.replace(hour=h, minute=_CRON_UTC_MINUTE, second=0, microsecond=0)
+        for h in _CRON_UTC_HOURS
+    ]
+    future = [s for s in today_slots if s > run_started_utc]
+    if future:
+        next_utc = future[0]
+    else:
+        tomorrow = run_started_utc + timedelta(days=1)
+        next_utc = tomorrow.replace(
+            hour=_CRON_UTC_HOURS[0],
+            minute=_CRON_UTC_MINUTE,
+            second=0,
+            microsecond=0,
+        )
     return next_utc.astimezone(_NAIROBI).strftime("%a %Y-%m-%d %H:%M EAT")
 
 
@@ -54,10 +65,12 @@ def _has_open_position(symbol: str, positions) -> bool:
 def _drop_in_progress_candle(df):
     """Drop the most recent bar — at scan time it's still forming.
 
-    The strategy doc is explicit: evaluate on closed candles. The watcher
-    runs at 03:02 UTC; the daily candle at 00:00 UTC is 3 hours into its
-    24-hour window, the current 4H candle is 3 hours into a 4-hour window,
-    and the current 1H candle is 2 minutes old. None of them are closed.
+    The strategy doc is explicit: evaluate on closed candles. The cron
+    fires at :17 of 00/04/08/12/16/20 UTC; at every scan time the most
+    recent 1H bar is ~17 minutes old, the most recent 4H bar is between
+    17 minutes and 4 hours into its window (the :17 minute is always
+    inside the current 4H bar, never on its boundary), and the daily
+    bar is some hours into its 24-hour window. None are closed.
     """
     if len(df) > 0:
         return df.iloc[:-1].copy()

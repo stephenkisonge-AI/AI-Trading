@@ -52,12 +52,19 @@ Trade only these pairs. Add new pairs only if I approve.
 
 1. **BTC/USD** — primary
 2. **ETH/USD** — primary
-3. **SOL/USD** — only after we've seen 10+ trades on BTC and ETH and
-   confirmed the data quality on Alpaca is clean (no gaps, reasonable
-   spreads, working bars at 1H/4H/D)
+3. **SOL/USD** — alt L1, narrative-differentiated from BTC/ETH
+4. **LINK/USD** — oracle infra, sometimes decouples on coin-specific news
+5. **AVAX/USD** — alt L1, different consensus / subnet model
 
-That's it for now. No LINK, no AVAX, no DOT, no AAVE until BTC and ETH
-prove the system works. Discipline > diversification.
+Cap at 5 for now. Adding pairs increases setup frequency but does NOT
+reduce risk — everything in crypto is 70%+ correlated to BTC in down
+moves. More pairs = more decisions to ignore correctly during chop, not
+more diversification. No further additions until we have 30 closed
+trades of paper results across this universe.
+
+If a pair fails our no-trade conditions (spread > 0.5%, missing candles,
+repeated API errors) for 3+ consecutive scans, drop it from the active
+set and tell me — we either fix the data issue or remove the pair.
 
 ### Timeframes — three layers
 
@@ -153,6 +160,12 @@ Calculate in this exact order:
 Include estimated fees (~0.25% per side on Alpaca crypto) in the
 calculation. Round notional down to a quantity Alpaca will accept.
 
+**Fee-aware R reality:** Round-trip fees + slippage cost ~0.5% of
+notional. On a 3% stop that's about 0.17R of friction. TP1 at +1.5R
+nominal is really ~+1.3R net. Set the orders at nominal levels (the
+orders use prices, not R), but evaluate strategy expectancy on NET R
+after fees — not the headline number.
+
 ### Stops, targets, and trade management
 
 **Initial stop:** Whichever is tighter:
@@ -187,12 +200,19 @@ positions at market regardless of P&L.
 
 These are firm limits. Hitting any of them stops trading.
 
-- **Max simultaneous positions:** 2.
+- **Max simultaneous positions:** 2 — but BTC and ETH count as ONE slot
+  (correlation ~85%; holding both is one doubled-up bet on crypto, not
+  diversification). If BTC is open, ETH setups are skipped until BTC
+  closes, and vice versa. SOL, LINK, AVAX freely combinable with any
+  other within the 2-slot cap.
 - **Max new entries per day:** 1.
 - **Daily loss limit:** -2% of account equity (realized + unrealized).
   If hit, stop trading until next UTC day.
 - **Weekly loss limit:** -5% of account equity. If hit, stop trading
   until the following Monday UTC.
+- **Equity drawdown gate:** If peak-to-trough equity drawdown over any
+  rolling window hits -10%, pause and review before any new entries.
+  Catches the slow grind the daily/weekly caps miss.
 - **Consecutive loss cooldown:** After 3 losing trades in a row, pause
   for 24 hours minimum. Tell me. We review before resuming.
 - **No-trade conditions:** Skip any trade if you observe:
@@ -286,6 +306,23 @@ After 'go':
 - Week's running P&L vs the -5% cap
 - Any rule violations, skipped setups, missed setups, or API issues
 - One-line read on regime: "Still bullish" / "Weakening" / "Flipped"
+
+---
+
+## Expectancy check (every 10 closed trades)
+
+After every 10 closed trades, compute and log:
+
+- Win rate = wins / (wins + losses)
+- Average R won = mean R-multiple of winning trades
+- Average R lost = mean R-multiple of losing trades (negative number)
+- **Expectancy = (avg_R_won × win_rate) + (avg_R_lost × loss_rate)**
+- Largest peak-to-trough equity drawdown over the period
+
+After 30 closed trades, if NET expectancy (after fees) is not clearly
+positive — at least +0.2R per trade — the entry rules are not
+generating edge. Stop the experiment, don't rationalize. The strategy
+gets rewritten or abandoned. It does not continue running on hope.
 
 ---
 
