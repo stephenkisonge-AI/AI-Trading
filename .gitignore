@@ -30,3 +30,9 @@ state/*.jsonl
 *.log
 old_regime_output.txt
 new_regime_output.txt
+
+# Day-trade strategy state files — committed and owned by the
+# refresh-day-calendars workflow, not the watcher. Carve these out
+# of the broad state/*.json ignore above.
+!state/earnings.json
+!state/econ_events.json

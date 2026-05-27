@@ -1,0 +1,25 @@
+{
+  "_doc": "Upcoming earnings dates for the day-trade universe. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. Dates are ET local. Symbols not listed are exempt from the earnings filter (e.g., GLD).",
+  "refreshed_at": "2026-05-27T00:00:00Z",
+  "source": "manual_seed",
+  "earnings": {
+    "NVDA": [
+      "2026-08-27"
+    ],
+    "TSLA": [
+      "2026-07-23"
+    ],
+    "AAPL": [
+      "2026-08-06"
+    ],
+    "AMZN": [
+      "2026-07-30"
+    ],
+    "GOOGL": [
+      "2026-07-28"
+    ],
+    "MSFT": [
+      "2026-07-29"
+    ]
+  }
+}
