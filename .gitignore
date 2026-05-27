@@ -20,6 +20,9 @@ Thumbs.db
 .idea/
 *.swp
 
+# Claude Code runtime
+.claude/scheduled_tasks.lock
+
 # Watcher build
 .pytest_cache/
 state/*.json
