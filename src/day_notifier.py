@@ -97,15 +97,65 @@ def format_setup_alert(result: dict, *, daily_regime: str, intraday_character: s
     return "\n".join(lines)
 
 
+def format_lifecycle_block(stats: dict) -> list[str]:
+    """Render the D5c lifecycle stats as a list of lines suitable for
+    appending to any Telegram summary. Returns [] if `stats` is empty
+    or signals an error.
+    """
+    if not stats:
+        return []
+    if stats.get("error"):
+        return [f"Lifecycle (last {stats.get('days_back')}d): error — {stats['error']}"]
+    lines: list[str] = []
+    days = stats.get("days_back", 90)
+    total = stats.get("total_closed", 0)
+    open_n = stats.get("open_trades", 0)
+    lines.append(f"Lifecycle (last {days}d): {total} closed, {open_n} open")
+    if total == 0:
+        return lines
+    win_rate = stats.get("win_rate")
+    pl = stats.get("total_pl_usd", 0.0)
+    mean_r = stats.get("mean_r")
+    best_r = stats.get("best_r")
+    worst_r = stats.get("worst_r")
+    avg_min = stats.get("avg_minutes_in_trade")
+    win_rate_str = f"{win_rate * 100:.1f}%" if win_rate is not None else "n/a"
+    mean_r_str = f"{mean_r:+.2f}R" if mean_r is not None else "n/a"
+    best_str = f"{best_r:+.2f}R" if best_r is not None else "n/a"
+    worst_str = f"{worst_r:+.2f}R" if worst_r is not None else "n/a"
+    dur_str = f"{avg_min:.0f} min" if avg_min is not None else "n/a"
+    lines.append(
+        f"  win rate {win_rate_str} | P&L ${pl:+,.2f} | "
+        f"mean R {mean_r_str} | best {best_str} / worst {worst_str} | "
+        f"avg dur {dur_str}"
+    )
+    by_setup = stats.get("by_setup") or {}
+    setup_parts = []
+    for setup in ("A", "B", "unknown"):
+        bucket = by_setup.get(setup) or {}
+        n = bucket.get("closed", 0)
+        if n == 0:
+            continue
+        r = bucket.get("mean_r")
+        r_str = f"{r:+.2f}R" if r is not None else "n/a R"
+        setup_parts.append(f"{setup}={n}@{r_str}")
+    if setup_parts:
+        lines.append(f"  by setup: {', '.join(setup_parts)}")
+    warn = stats.get("expectancy_warning")
+    if warn:
+        lines.append(f"  ⚠️ {warn}")
+    return lines
+
+
 def format_no_qualifying_setups(
     *,
     now_et: datetime,
     candidates_scanned: int,
     skipped_summary: dict[str, int],
+    lifecycle_stats: dict | None = None,
 ) -> str:
     """End-of-scan summary when nothing qualified. Skipped via Telegram
-    once per scan tick so absence-of-signal is still visible. (For
-    alerts-only mode; in D4 this becomes the per-scan summary.)
+    once per scan tick so absence-of-signal is still visible.
     """
     lines: list[str] = []
     lines.append(
@@ -116,4 +166,7 @@ def format_no_qualifying_setups(
         lines.append("Skip reasons:")
         for reason, n in sorted(skipped_summary.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {reason}: {n}")
+    if lifecycle_stats is not None:
+        for ln in format_lifecycle_block(lifecycle_stats):
+            lines.append(ln)
     return "\n".join(lines)

@@ -593,3 +593,290 @@ def test_management_no_entry_fill_bails_safely():
         spy_5min_with_indicators=None,
     )
     assert res is None
+
+
+# ---------------------------------------------------------------------------
+# Phase D5c — lifecycle stats
+# ---------------------------------------------------------------------------
+
+
+from src.day_trader import (
+    _parse_setup_from_client_order_id,
+    _trade_walk_for_symbol,
+    summarize_day_lifecycle,
+)
+
+
+def _closed_buy(symbol, qty, price, filled_at, client_order_id=None):
+    return SimpleNamespace(
+        id=f"buy-{symbol}-{filled_at.isoformat()}",
+        symbol=symbol, qty=str(qty),
+        side="OrderSide.BUY",
+        order_type="OrderType.MARKET",
+        status="OrderStatus.FILLED",
+        filled_qty=str(qty), filled_avg_price=str(price),
+        filled_at=filled_at,
+        submitted_at=filled_at, created_at=filled_at,
+        stop_price=None,
+        client_order_id=client_order_id,
+    )
+
+
+def _closed_sell_limit(symbol, qty, price, filled_at):
+    return SimpleNamespace(
+        id=f"tp-{symbol}-{filled_at.isoformat()}",
+        symbol=symbol, qty=str(qty),
+        side="OrderSide.SELL",
+        order_type="OrderType.LIMIT",
+        status="OrderStatus.FILLED",
+        filled_qty=str(qty), filled_avg_price=str(price),
+        filled_at=filled_at,
+        submitted_at=filled_at, created_at=filled_at,
+        stop_price=None,
+        client_order_id=None,
+    )
+
+
+def _closed_sell_stop(symbol, qty, price, stop_price, filled_at):
+    return SimpleNamespace(
+        id=f"stop-{symbol}-{filled_at.isoformat()}",
+        symbol=symbol, qty=str(qty),
+        side="OrderSide.SELL",
+        order_type="OrderType.STOP",
+        status="OrderStatus.FILLED",
+        filled_qty=str(qty), filled_avg_price=str(price),
+        filled_at=filled_at,
+        submitted_at=filled_at, created_at=filled_at,
+        stop_price=str(stop_price),
+        client_order_id=None,
+    )
+
+
+def _closed_sell_market(symbol, qty, price, filled_at):
+    return SimpleNamespace(
+        id=f"mgmt-{symbol}-{filled_at.isoformat()}",
+        symbol=symbol, qty=str(qty),
+        side="OrderSide.SELL",
+        order_type="OrderType.MARKET",
+        status="OrderStatus.FILLED",
+        filled_qty=str(qty), filled_avg_price=str(price),
+        filled_at=filled_at,
+        submitted_at=filled_at, created_at=filled_at,
+        stop_price=None,
+        client_order_id=None,
+    )
+
+
+class LifecycleFakeClient(MgmtFakeClient):
+    def __init__(self, closed_orders=()):
+        super().__init__()
+        self._closed_orders = list(closed_orders)
+
+    def get_orders(self, filter=None):
+        return list(self._closed_orders)
+
+
+def test_parse_setup_from_client_order_id():
+    assert _parse_setup_from_client_order_id("DAY-A-NVDA-1748448000") == "A"
+    assert _parse_setup_from_client_order_id("DAY-B-AAPL-1748448000") == "B"
+    assert _parse_setup_from_client_order_id(None) == "unknown"
+    assert _parse_setup_from_client_order_id("") == "unknown"
+    # Wrong prefix or unknown setup letter falls back gracefully.
+    assert _parse_setup_from_client_order_id("CRYPTO-A-BTC-1") == "unknown"
+    assert _parse_setup_from_client_order_id("DAY-Z-NVDA-1") == "unknown"
+
+
+def test_lifecycle_empty_history():
+    client = LifecycleFakeClient(closed_orders=[])
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 0
+    assert stats["open_trades"] == 0
+    assert stats["win_rate"] is None
+    assert stats["mean_r"] is None
+    assert stats["expectancy_warning"] is None
+    assert stats["error"] is None
+
+
+def test_lifecycle_single_winning_trade_via_tp():
+    # Bought 5 @ $100 with Setup A tag, stop at $99, TP1 at $101 (2 sh),
+    # TP2 at $102 (3 sh). Both TPs fill. PL = 2*1 + 3*2 = $8.
+    # R = 5 * (100 - 99) = $5 risk. trade R-multiple = 8/5 = 1.6R.
+    entry_t = datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)
+    stop_t = entry_t + timedelta(minutes=5)  # stop order accepted but didn't fill
+    tp1_t = entry_t + timedelta(minutes=15)
+    tp2_t = entry_t + timedelta(minutes=45)
+    orders = [
+        _closed_buy("NVDA", 5, 100.0, entry_t,
+                    client_order_id=f"DAY-A-NVDA-{int(entry_t.timestamp())}"),
+        # Stop SELL with stop_price recorded (qty 0 = never filled, but
+        # the stop_price is still on the order and gets recorded in
+        # stops_seen by the trade walker).
+        SimpleNamespace(
+            id="stop-NVDA", symbol="NVDA", qty="5",
+            side="OrderSide.SELL", order_type="OrderType.STOP",
+            status="OrderStatus.CANCELED",
+            filled_qty="0", filled_avg_price=None,
+            filled_at=None, submitted_at=stop_t, created_at=stop_t,
+            stop_price="99.0", client_order_id=None,
+        ),
+        _closed_sell_limit("NVDA", 2, 101.0, tp1_t),
+        _closed_sell_limit("NVDA", 3, 102.0, tp2_t),
+    ]
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 1
+    assert stats["wins"] == 1
+    assert stats["losses"] == 0
+    assert stats["win_rate"] == 1.0
+    assert stats["total_pl_usd"] == pytest.approx(8.0)
+    assert stats["mean_r"] == pytest.approx(1.6)
+    assert stats["best_r"] == pytest.approx(1.6)
+    assert stats["worst_r"] == pytest.approx(1.6)
+    assert stats["by_setup"]["A"]["closed"] == 1
+    assert stats["by_setup"]["A"]["wins"] == 1
+    assert stats["by_setup"]["B"]["closed"] == 0
+    assert stats["by_symbol"]["NVDA"]["closed"] == 1
+    # Avg duration ≈ 45 min (entry to last exit).
+    assert stats["avg_minutes_in_trade"] == pytest.approx(45.0)
+
+
+def test_lifecycle_single_losing_trade_via_stop():
+    # Bought 5 @ $100, stop at $99 fills full position. PL = 5 * -1 = -$5.
+    # R = $5 risk → R-multiple = -1.0.
+    entry_t = datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)
+    stop_t = entry_t + timedelta(minutes=20)
+    orders = [
+        _closed_buy("AAPL", 5, 100.0, entry_t,
+                    client_order_id=f"DAY-B-AAPL-{int(entry_t.timestamp())}"),
+        _closed_sell_stop("AAPL", 5, 99.0, 99.0, stop_t),
+    ]
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 1
+    assert stats["wins"] == 0
+    assert stats["losses"] == 1
+    assert stats["win_rate"] == 0.0
+    assert stats["total_pl_usd"] == pytest.approx(-5.0)
+    assert stats["mean_r"] == pytest.approx(-1.0)
+    assert stats["by_setup"]["B"]["closed"] == 1
+    assert stats["by_setup"]["A"]["closed"] == 0
+
+
+def test_lifecycle_mgmt_close_classified_correctly():
+    # Time-stop or 3:55 close: stop order accepted (recorded for R), then
+    # a market SELL closes the position.
+    entry_t = datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)
+    stop_t = entry_t + timedelta(minutes=1)
+    close_t = entry_t + timedelta(minutes=35)
+    orders = [
+        _closed_buy("TSLA", 5, 100.0, entry_t,
+                    client_order_id=f"DAY-A-TSLA-{int(entry_t.timestamp())}"),
+        # Cancelled stop with stop_price still on the order.
+        SimpleNamespace(
+            id="stop-TSLA", symbol="TSLA", qty="5",
+            side="OrderSide.SELL", order_type="OrderType.STOP",
+            status="OrderStatus.CANCELED",
+            filled_qty="0", filled_avg_price=None,
+            filled_at=None, submitted_at=stop_t, created_at=stop_t,
+            stop_price="99.0", client_order_id=None,
+        ),
+        _closed_sell_market("TSLA", 5, 100.10, close_t),
+    ]
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 1
+    # PL = 5 * 0.10 = $0.50, R = $5 risk → 0.10R.
+    assert stats["total_pl_usd"] == pytest.approx(0.5)
+    assert stats["mean_r"] == pytest.approx(0.1)
+    assert stats["wins"] == 1  # positive PL counts as win
+
+
+def test_lifecycle_expectancy_warning_threshold():
+    # Need ≥50 closed trades AND mean R < 0.2 for the warning to fire.
+    # Below 50: no warning even at bad R.
+    orders = []
+    for i in range(49):
+        et = datetime(2026, 5, 1, 14, 0, tzinfo=_UTC) + timedelta(days=i)
+        st = et + timedelta(minutes=10)
+        orders.append(_closed_buy(
+            "NVDA", 5, 100.0, et,
+            client_order_id=f"DAY-A-NVDA-{int(et.timestamp())}",
+        ))
+        orders.append(_closed_sell_stop("NVDA", 5, 99.0, 99.0, st))
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 49
+    assert stats["expectancy_warning"] is None  # below sample threshold
+
+    # Now 50 trades, all losing 1R → mean_r = -1.0 < 0.2 → warning fires.
+    et = datetime(2026, 5, 1, 14, 0, tzinfo=_UTC) + timedelta(days=49)
+    st = et + timedelta(minutes=10)
+    orders.append(_closed_buy(
+        "NVDA", 5, 100.0, et,
+        client_order_id=f"DAY-A-NVDA-{int(et.timestamp())}",
+    ))
+    orders.append(_closed_sell_stop("NVDA", 5, 99.0, 99.0, st))
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 50
+    assert stats["expectancy_warning"] is not None
+    assert "STOP the experiment" in stats["expectancy_warning"]
+
+
+def test_lifecycle_orders_fetch_failure_returns_error():
+    class FailingClient(LifecycleFakeClient):
+        def get_orders(self, filter=None):
+            raise RuntimeError("alpaca timeout")
+    stats = summarize_day_lifecycle(client=FailingClient())
+    assert stats["error"] is not None
+    assert "alpaca timeout" in stats["error"]
+    # Other fields not populated when fetch fails.
+    assert "total_closed" not in stats
+
+
+def test_lifecycle_open_trade_not_counted_as_closed():
+    # Bought but not exited yet → counted as open, not closed.
+    entry_t = datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)
+    orders = [
+        _closed_buy("NVDA", 5, 100.0, entry_t,
+                    client_order_id=f"DAY-A-NVDA-{int(entry_t.timestamp())}"),
+    ]
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 0
+    assert stats["open_trades"] == 1
+    assert stats["win_rate"] is None
+
+
+def test_lifecycle_per_symbol_breakdown():
+    e1 = datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)
+    e2 = datetime(2026, 5, 28, 14, 30, tzinfo=_UTC)
+    orders = [
+        _closed_buy("NVDA", 5, 100.0, e1,
+                    client_order_id=f"DAY-A-NVDA-{int(e1.timestamp())}"),
+        _closed_sell_stop("NVDA", 5, 99.0, 99.0, e1 + timedelta(minutes=10)),
+        _closed_buy("AAPL", 5, 100.0, e2,
+                    client_order_id=f"DAY-B-AAPL-{int(e2.timestamp())}"),
+        _closed_sell_limit("AAPL", 5, 102.0, e2 + timedelta(minutes=20)),
+    ]
+    client = LifecycleFakeClient(closed_orders=orders)
+    stats = summarize_day_lifecycle(client=client)
+    assert stats["total_closed"] == 2
+    assert stats["by_symbol"]["NVDA"]["closed"] == 1
+    assert stats["by_symbol"]["NVDA"]["wins"] == 0
+    assert stats["by_symbol"]["AAPL"]["closed"] == 1
+    assert stats["by_symbol"]["AAPL"]["wins"] == 1
+
+
+def test_entry_bundle_sets_client_order_id_for_setup_tagging():
+    """D4c expects D4a to tag entry BUYs with client_order_id so the
+    lifecycle walker can recover the setup type. Verify the tag format.
+    """
+    client = FakeClient(equity=100_000, fill_price=100.5)
+    setup = _setup_result()  # setup == "A", symbol == "NVDA"
+    result = place_entry_bundle(setup, equity=100_000, client=client)
+    assert result["placed"] is True
+
+    entry_req, _ = client.submitted[0]
+    assert hasattr(entry_req, "client_order_id")
+    assert entry_req.client_order_id.startswith("DAY-A-NVDA-")

@@ -47,6 +47,7 @@ from src.day_trader import (
     day_auto_execute_enabled,
     manage_open_positions,
     place_entry_bundle,
+    summarize_day_lifecycle,
 )
 from src.indicators import atr, ema
 from src.notifier import send_alert
@@ -506,12 +507,21 @@ def run_intraday_scan(now_et: datetime) -> dict:
                   file=sys.stderr)
             send_alert(f"⚠️ day-watcher error on {sym}: {exc}")
 
+    # D5c — lifecycle stats reconstructed from order history each scan.
+    # Best-effort: failures surface as an inline "error" field, never
+    # block the scan.
+    try:
+        lifecycle = summarize_day_lifecycle(client=client)
+    except Exception as exc:
+        lifecycle = {"error": f"summarize crashed: {exc}", "days_back": 90}
+
     qualifying = [r for r in scan_results if r["qualified_setup"] is not None]
     if not qualifying:
         send_alert(format_no_qualifying_setups(
             now_et=now_et.astimezone(ET),
             candidates_scanned=len(scan_results),
             skipped_summary=skipped_counter,
+            lifecycle_stats=lifecycle,
         ))
 
     return {
@@ -519,6 +529,7 @@ def run_intraday_scan(now_et: datetime) -> dict:
         "scanned": len(scan_results),
         "qualified": len(qualifying),
         "skipped": skipped_counter,
+        "lifecycle": lifecycle,
     }
 
 

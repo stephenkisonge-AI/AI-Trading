@@ -79,6 +79,18 @@ _TIME_STOP_R_FRACTION = 0.25
 # Order-history lookback when reconstructing position state from Alpaca
 # (find fill_time, find original stop). 1 day is enough for intraday.
 _ORDER_HISTORY_LOOKBACK_DAYS = 1
+
+# --- D5c lifecycle tunables ----------------------------------------------
+# Per Day_Trading_Strategy.md §"Phase D5c". 90 days mirrors crypto.
+_LIFECYCLE_LOOKBACK_DAYS = 90
+# Below this mean R after the sample threshold = stop the experiment.
+_EXPECTANCY_MIN_R = 0.2
+# Day-trade sample threshold — doc says "at least 50 closed day trades"
+# (vs swing's 30) because per-trade edge is smaller intraday.
+_MIN_SAMPLE_FOR_EXPECTANCY = 50
+# client_order_id prefix used to tag entry BUYs with setup type — parsed
+# back out during lifecycle reconstruction.
+_CLIENT_ORDER_ID_PREFIX = "DAY"
 # -------------------------------------------------------------------------
 
 UNIVERSE = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"]
@@ -256,10 +268,20 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     }
 
     # --- 1. Market BUY entry ---
+    # Tag with client_order_id encoding the setup type — D5c lifecycle
+    # stats parses this back out to compute per-setup expectancy.
+    # Format: DAY-{A|B}-{SYMBOL}-{epoch_seconds}. Safely under Alpaca's
+    # 48-char client_order_id limit.
+    epoch_s = int(datetime.now(timezone.utc).timestamp())
+    client_order_id = (
+        f"{_CLIENT_ORDER_ID_PREFIX}-{setup_result['setup']}-"
+        f"{symbol}-{epoch_s}"
+    )
     try:
         entry_req = MarketOrderRequest(
             symbol=symbol, qty=shares, side=OrderSide.BUY,
             time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id,
         )
         entry_order = client.submit_order(entry_req)
         order_ids["entry"] = str(entry_order.id)
@@ -654,3 +676,259 @@ def manage_open_positions(
                 "error": f"management crashed: {exc}",
             })
     return actions
+
+
+# =========================================================================
+# Phase D5c — lifecycle stats
+# =========================================================================
+
+
+def _parse_setup_from_client_order_id(client_order_id: str | None) -> str:
+    """Recover setup type from the entry BUY's client_order_id.
+
+    Format: DAY-{A|B}-{SYMBOL}-{epoch_seconds}. Returns 'A', 'B', or
+    'unknown' when the prefix is missing or malformed (covers orders
+    placed manually or by older code).
+    """
+    if not client_order_id:
+        return "unknown"
+    parts = client_order_id.split("-")
+    if len(parts) < 2 or parts[0] != _CLIENT_ORDER_ID_PREFIX:
+        return "unknown"
+    setup = parts[1]
+    return setup if setup in ("A", "B") else "unknown"
+
+
+def _trade_walk_for_symbol(orders_sorted: list) -> list[dict]:
+    """Walk a single symbol's CLOSED orders (chronological) and produce
+    trade objects.
+
+    A trade opens on filled BUY and closes when sold qty equals the
+    entry qty (or when a new BUY arrives — defensive).
+
+    Each trade dict carries `setup` recovered from the entry's
+    client_order_id; `stops_seen` (for R reconstruction); `exits`
+    list with reason classification (STOP / TP / MGMT_CLOSE); and
+    `entry_at` / `last_exit_at` for duration math.
+    """
+    trades: list[dict] = []
+    current: dict | None = None
+
+    def _is_buy(o):
+        return str(getattr(o, "side", "")).lower().endswith("buy")
+
+    def _is_sell(o):
+        return str(getattr(o, "side", "")).lower().endswith("sell")
+
+    def _otype(o):
+        return str(getattr(o, "order_type", "")).lower()
+
+    for o in orders_sorted:
+        fq = float(getattr(o, "filled_qty", 0) or 0)
+        fp = float(getattr(o, "filled_avg_price", 0) or 0)
+        stop_px = float(getattr(o, "stop_price", 0) or 0)
+        filled_at = getattr(o, "filled_at", None)
+
+        if _is_buy(o) and fq > 0:
+            if current is not None:
+                trades.append(current)
+            current = {
+                "symbol": getattr(o, "symbol", ""),
+                "setup": _parse_setup_from_client_order_id(
+                    getattr(o, "client_order_id", None)
+                ),
+                "entry_at": filled_at,
+                "entry_qty": fq,
+                "entry_price": fp,
+                "qty_remaining": fq,
+                "exits": [],
+                "stops_seen": [],
+                "last_exit_at": None,
+            }
+            continue
+
+        if current is None:
+            continue
+
+        otype = _otype(o)
+        if "stop" in otype and _is_sell(o):
+            if stop_px > 0:
+                current["stops_seen"].append(stop_px)
+            if fq > 0:
+                current["exits"].append({"qty": fq, "price": fp, "reason": "STOP"})
+                current["qty_remaining"] -= fq
+                current["last_exit_at"] = filled_at
+        elif _is_sell(o) and "limit" in otype:
+            if fq > 0:
+                current["exits"].append({"qty": fq, "price": fp, "reason": "TP"})
+                current["qty_remaining"] -= fq
+                current["last_exit_at"] = filled_at
+        elif _is_sell(o) and fq > 0:
+            current["exits"].append({"qty": fq, "price": fp, "reason": "MGMT_CLOSE"})
+            current["qty_remaining"] -= fq
+            current["last_exit_at"] = filled_at
+
+        if current["qty_remaining"] < current["entry_qty"] * 0.01:
+            trades.append(current)
+            current = None
+
+    if current is not None:
+        trades.append(current)
+    return trades
+
+
+def _aggregate_bucket(trades: list[dict]) -> dict:
+    """Compute closed/wins/mean_r for a bucket of trades."""
+    closed = [t for t in trades if t["qty_remaining"] < t["entry_qty"] * 0.01]
+    wins = 0
+    r_multiples: list[float] = []
+    for t in closed:
+        entry_value = t["entry_qty"] * t["entry_price"]
+        exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
+        pl = exit_value - entry_value
+        if pl > 0:
+            wins += 1
+        if t["stops_seen"]:
+            orig_stop = min(t["stops_seen"])
+            risk_per_unit = t["entry_price"] - orig_stop
+            if risk_per_unit > 0:
+                r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
+    return {
+        "closed": len(closed),
+        "wins": wins,
+        "mean_r": (sum(r_multiples) / len(r_multiples)) if r_multiples else None,
+    }
+
+
+def summarize_day_lifecycle(
+    days_back: int = _LIFECYCLE_LOOKBACK_DAYS,
+    client=None,
+) -> dict:
+    """Reconstruct closed day-trade trades from Alpaca order history and
+    compute aggregate stats.
+
+    Stateless — runs each scan. Cheap (one orders fetch). Returns the
+    same shape regardless of whether auto-execute is currently enabled,
+    so toggling the kill switch doesn't lose visibility into prior
+    auto-executed trades.
+
+    Schema:
+        {
+          "days_back": int,
+          "total_closed": int,  "open_trades": int,
+          "wins": int,          "losses": int,
+          "win_rate": float | None,
+          "total_pl_usd": float,
+          "mean_r": float | None,  "best_r": float | None, "worst_r": float | None,
+          "avg_minutes_in_trade": float | None,
+          "by_setup": {"A": {...}, "B": {...}, "unknown": {...}},
+          "by_symbol": {sym: {...}, ...},
+          "expectancy_warning": str | None,
+          "error": str | None,   # set when the orders fetch fails
+        }
+    """
+    if client is None:
+        client = get_client()
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
+    try:
+        closed_orders = client.get_orders(filter=GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED,
+            after=cutoff,
+            symbols=UNIVERSE,
+            limit=500,
+        ))
+    except Exception as exc:
+        return {
+            "days_back": days_back,
+            "error": f"order fetch failed: {exc}",
+        }
+
+    by_symbol: dict[str, list] = {}
+    for o in closed_orders:
+        sym = getattr(o, "symbol", None)
+        if sym:
+            by_symbol.setdefault(sym, []).append(o)
+
+    def _ts(o):
+        return (
+            getattr(o, "submitted_at", None)
+            or getattr(o, "created_at", None)
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+
+    all_trades: list[dict] = []
+    for sym, orders in by_symbol.items():
+        orders.sort(key=_ts)
+        all_trades.extend(_trade_walk_for_symbol(orders))
+
+    closed = [t for t in all_trades if t["qty_remaining"] < t["entry_qty"] * 0.01]
+    open_trades = len(all_trades) - len(closed)
+
+    stats: dict = {
+        "days_back": days_back,
+        "total_closed": len(closed),
+        "open_trades": open_trades,
+        "wins": 0, "losses": 0,
+        "win_rate": None,
+        "total_pl_usd": 0.0,
+        "mean_r": None, "best_r": None, "worst_r": None,
+        "avg_minutes_in_trade": None,
+        "by_setup": {},
+        "by_symbol": {},
+        "expectancy_warning": None,
+        "error": None,
+    }
+
+    r_multiples: list[float] = []
+    durations_min: list[float] = []
+    for t in closed:
+        entry_value = t["entry_qty"] * t["entry_price"]
+        exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
+        pl = exit_value - entry_value
+        stats["total_pl_usd"] += pl
+        if pl > 0:
+            stats["wins"] += 1
+        else:
+            stats["losses"] += 1
+        if t["stops_seen"]:
+            orig_stop = min(t["stops_seen"])
+            risk_per_unit = t["entry_price"] - orig_stop
+            if risk_per_unit > 0:
+                r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
+        if t["entry_at"] and t["last_exit_at"]:
+            try:
+                dur = (t["last_exit_at"] - t["entry_at"]).total_seconds() / 60.0
+                if dur >= 0:
+                    durations_min.append(dur)
+            except (TypeError, AttributeError):
+                pass
+
+    if stats["total_closed"] > 0:
+        stats["win_rate"] = stats["wins"] / stats["total_closed"]
+    if r_multiples:
+        stats["mean_r"] = sum(r_multiples) / len(r_multiples)
+        stats["best_r"] = max(r_multiples)
+        stats["worst_r"] = min(r_multiples)
+        if (stats["total_closed"] >= _MIN_SAMPLE_FOR_EXPECTANCY
+                and stats["mean_r"] < _EXPECTANCY_MIN_R):
+            stats["expectancy_warning"] = (
+                f"mean R {stats['mean_r']:+.2f} below +{_EXPECTANCY_MIN_R}R "
+                f"after {stats['total_closed']} day trades — "
+                f"strategy doc says STOP the experiment"
+            )
+    if durations_min:
+        stats["avg_minutes_in_trade"] = sum(durations_min) / len(durations_min)
+
+    # Per-setup and per-symbol breakdowns.
+    by_setup_trades: dict[str, list[dict]] = {"A": [], "B": [], "unknown": []}
+    by_symbol_trades: dict[str, list[dict]] = {}
+    for t in all_trades:
+        by_setup_trades[t["setup"]].append(t)
+        by_symbol_trades.setdefault(t["symbol"], []).append(t)
+    for setup, trades in by_setup_trades.items():
+        stats["by_setup"][setup] = _aggregate_bucket(trades)
+    for sym, trades in by_symbol_trades.items():
+        stats["by_symbol"][sym] = _aggregate_bucket(trades)
+
+    return stats
