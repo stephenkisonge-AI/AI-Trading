@@ -112,7 +112,14 @@ def fetch_econ_events() -> list[dict]:
     Update annually — these events publish their schedules well in
     advance.
     """
-    from scripts.econ_calendar_data import ECON_CALENDAR
+    # Add scripts/ to sys.path so this import works both when run as
+    # `python scripts/refresh_day_calendars.py` (GH Actions invocation,
+    # scripts/ is not a package) AND when imported via `from scripts
+    # import refresh_day_calendars` (test invocation).
+    scripts_dir = str(Path(__file__).resolve().parent)
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from econ_calendar_data import ECON_CALENDAR
     today = datetime.now(timezone.utc).date()
     horizon = today + timedelta(days=_ECON_HORIZON_DAYS)
     out: list[dict] = []
