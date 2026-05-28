@@ -1,0 +1,59 @@
+name: Day Watcher
+
+on:
+  schedule:
+    # Every 5 minutes from 13:00 to 20:59 UTC, Monday-Friday. Window is
+    # deliberately wider than the actual ET trading session (9:30-16:00)
+    # to accommodate both EDT (13:30-20:00 UTC) and EST (14:30-21:00 UTC)
+    # without DST-aware switching. The watcher's determine_phase() filters
+    # out PHASE_OUTSIDE ticks early — they consume a cron trigger but
+    # do almost no work. Approx ~480 ticks/week.
+    - cron: '*/5 13-20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      test_ping:
+        description: 'Send a Telegram test ping instead of running the scan'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send Telegram test ping
+        if: github.event.inputs.test_ping == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "import sys; from src.notifier import send_alert; sys.exit(0 if send_alert('🧪 day-watcher → Telegram pipeline test (workflow_dispatch test_ping=true).') else 1)"
+
+      - name: Run day watcher
+        if: github.event.inputs.test_ping != 'true'
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # D4 kill switch — set this GitHub Secret to "true" to enable
+          # auto-execution of qualifying setups. Anything else (unset,
+          # "false", empty) keeps the watcher in alerts-only mode.
+          # Hard-refused unless ALPACA_PAPER_TRADE=True — see
+          # src/day_trader.py:day_auto_execute_enabled().
+          WATCHER_DAY_AUTO_EXECUTE: ${{ secrets.WATCHER_DAY_AUTO_EXECUTE }}
+        run: python -m src.day_watcher
