@@ -42,6 +42,11 @@ from src.day_strategy import (
     evaluate_setup_b,
     pick_winner,
 )
+from src.day_trader import (
+    check_pre_execution_gates,
+    day_auto_execute_enabled,
+    place_entry_bundle,
+)
 from src.indicators import atr, ema
 from src.notifier import send_alert
 
@@ -400,6 +405,55 @@ def run_intraday_scan(now_et: datetime) -> dict:
                     ),
                 )
                 send_alert(msg)
+                # D5a — auto-execute if kill switch is set. Gates run
+                # against broker state; failures surface as a Telegram
+                # alert and don't abort the rest of the scan.
+                if day_auto_execute_enabled():
+                    try:
+                        equity = float(client.get_account().equity)
+                        gate = check_pre_execution_gates(
+                            client, setup_result, equity=equity,
+                        )
+                        if not gate.allowed:
+                            send_alert(
+                                f"⏭ AUTO-EXEC SKIP — {sym} Setup {setup_result['setup']}: "
+                                f"{gate.reason}"
+                            )
+                        else:
+                            exec_result = place_entry_bundle(
+                                setup_result,
+                                equity=equity,
+                                client=client,
+                            )
+                            if not exec_result.get("placed", False):
+                                send_alert(
+                                    f"⚠️ AUTO-EXEC FAILED — {sym} entry rejected: "
+                                    f"{exec_result.get('skip_reason') or exec_result.get('errors')}"
+                                )
+                            elif not exec_result.get("protective_orders_complete", False):
+                                send_alert(
+                                    f"🚨 AUTO-EXEC PARTIAL — {sym} entry filled at "
+                                    f"${exec_result.get('fill_price')} BUT some protective "
+                                    f"orders failed: {exec_result.get('errors')}. "
+                                    f"Order IDs: {exec_result.get('order_ids')}. "
+                                    f"MANUALLY VERIFY POSITION."
+                                )
+                            else:
+                                tp2_str = (
+                                    f"${exec_result['tp2_price']:.2f}"
+                                    if exec_result.get("tp2_price") is not None
+                                    else "n/a"
+                                )
+                                send_alert(
+                                    f"✅ AUTO-EXEC FILLED — {sym} Setup "
+                                    f"{setup_result['setup']} @ ${exec_result['fill_price']:.2f} "
+                                    f"× {exec_result['shares']} sh. "
+                                    f"Stop ${exec_result['stop_price']:.2f}, "
+                                    f"TP1 ${exec_result['tp1_price']:.2f}, "
+                                    f"TP2 {tp2_str}"
+                                )
+                    except Exception as exc:
+                        send_alert(f"⚠️ AUTO-EXEC error on {sym}: {exc}")
             else:
                 reason = res.get("skip_reason") or "unknown"
                 skipped_counter[reason] = skipped_counter.get(reason, 0) + 1
