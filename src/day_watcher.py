@@ -45,6 +45,7 @@ from src.day_strategy import (
 from src.day_trader import (
     check_pre_execution_gates,
     day_auto_execute_enabled,
+    manage_open_positions,
     place_entry_bundle,
 )
 from src.indicators import atr, ema
@@ -354,9 +355,51 @@ def run_intraday_scan(now_et: datetime) -> dict:
 
     # Position lookup — one slot enforced strategy-wide; we ask the
     # broker rather than relying on internal state, matching crypto.
-    has_any_position = False
     try:
         client = get_client()
+    except Exception as exc:
+        send_alert(f"⚠️ day-watcher could not init client: {exc}")
+        return {"phase": "intraday_scan", "error": "client_init_failed"}
+
+    # D5b — management pass runs BEFORE the entry scan so any closes
+    # free the position slot in time for entry gates to see it.
+    mgmt_actions: list[dict] = []
+    if day_auto_execute_enabled():
+        mgmt_actions = manage_open_positions(
+            now_et=now_et,
+            spy_5min_with_indicators=spy_5min_with_ind,
+            client=client,
+        )
+        for act in mgmt_actions:
+            symbol = act.get("symbol", "?")
+            action = act.get("action", "?")
+            reason = act.get("reason", "")
+            err = act.get("error")
+            if err:
+                send_alert(f"⚠️ MGMT ERROR — {symbol} {action}: {err}")
+            elif action == "breakeven_move":
+                send_alert(
+                    f"📍 STOP → BREAKEVEN — {symbol} stop moved to "
+                    f"${act.get('stop_price'):.2f} (qty {act.get('qty')})."
+                )
+            elif action == "hard_close_355pm":
+                send_alert(
+                    f"🕒 3:55 PM EXIT — {symbol} closed at market. "
+                    f"({reason}). Cancelled {len(act.get('cancelled_orders', []))} resting orders."
+                )
+            elif action == "hard_exit_spy_vwap_break":
+                send_alert(
+                    f"🚪 SPY-VWAP HARD EXIT — {symbol} closed at market. "
+                    f"({reason}). Cancelled {len(act.get('cancelled_orders', []))} resting orders."
+                )
+            elif action == "time_stop":
+                send_alert(
+                    f"⏱ TIME STOP — {symbol} closed at market. "
+                    f"({reason}). Cancelled {len(act.get('cancelled_orders', []))} resting orders."
+                )
+
+    # Re-fetch positions after management — closes may have freed the slot.
+    try:
         positions = client.get_all_positions()
         has_any_position = len(positions) > 0
     except Exception as exc:

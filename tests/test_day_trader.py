@@ -1,10 +1,13 @@
-"""Tests for src/day_trader.py — sizing math, gates, and entry-bundle
-placement against an in-memory fake TradingClient.
+"""Tests for src/day_trader.py — sizing math, gates, entry-bundle
+placement, and D5b in-trade management against an in-memory fake
+TradingClient.
 """
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 
 from src.day_trader import (
@@ -12,8 +15,12 @@ from src.day_trader import (
     check_pre_execution_gates,
     compute_position_size,
     day_auto_execute_enabled,
+    manage_position,
     place_entry_bundle,
 )
+
+_ET = ZoneInfo("America/New_York")
+_UTC = timezone.utc
 
 
 # ---------------------------------------------------------------------------
@@ -316,3 +323,273 @@ def test_entry_bundle_returns_failure_when_market_buy_rejected():
     result = place_entry_bundle(_setup_result(), equity=100_000, client=client)
     assert result["placed"] is False
     assert any(c == "entry" for c, _ in result["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Phase D5b — in-trade management
+# ---------------------------------------------------------------------------
+
+
+def _et_dt(d: date, t: time) -> datetime:
+    return datetime.combine(d, t, tzinfo=_ET)
+
+
+def _open_position(symbol="NVDA", qty=5, avg_entry=100.0, current=101.0):
+    return SimpleNamespace(
+        symbol=symbol, qty=str(qty),
+        avg_entry_price=str(avg_entry),
+        current_price=str(current),
+    )
+
+
+def _filled_buy_order(symbol="NVDA", qty=5, filled_at=None, side="buy"):
+    return SimpleNamespace(
+        id=f"buy-{symbol}", symbol=symbol, qty=str(qty),
+        side=f"OrderSide.{side.upper()}",
+        status="OrderStatus.FILLED",
+        filled_at=filled_at or datetime(2026, 5, 28, 14, 0, tzinfo=_UTC),
+        order_type="OrderType.MARKET",
+        stop_price=None,
+    )
+
+
+def _open_stop_order(symbol="NVDA", qty=5, stop_price=99.0):
+    return SimpleNamespace(
+        id=f"stop-{symbol}", symbol=symbol, qty=str(qty),
+        side="OrderSide.SELL",
+        status="OrderStatus.NEW",
+        filled_at=None,
+        order_type="OrderType.STOP",
+        stop_price=str(stop_price),
+    )
+
+
+def _filled_limit_sell(symbol="NVDA", qty=2, filled_at=None, limit_price=101.0):
+    return SimpleNamespace(
+        id=f"tp1-{symbol}", symbol=symbol, qty=str(qty),
+        side="OrderSide.SELL",
+        status="OrderStatus.FILLED",
+        filled_at=filled_at or datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),
+        order_type="OrderType.LIMIT",
+        limit_price=str(limit_price),
+        stop_price=None,
+    )
+
+
+class MgmtFakeClient(FakeClient):
+    """Extends FakeClient with cancel + custom orders list for D5b paths."""
+
+    def __init__(self, orders=(), **kwargs):
+        super().__init__(orders=orders, **kwargs)
+        self.cancelled: list[str] = []
+
+    def cancel_order_by_id(self, order_id):
+        self.cancelled.append(str(order_id))
+
+    def get_all_positions(self):
+        return getattr(self, "_positions", [])
+
+
+def test_management_3_55pm_hard_close():
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[_filled_buy_order(), _open_stop_order()])
+    now = _et_dt(date(2026, 5, 28), time(15, 56))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is not None
+    assert res["action"] == "hard_close_355pm"
+    assert res["close_order_id"] is not None
+    assert res["error"] is None
+    # All resting orders cancelled before the market sell.
+    assert "stop-NVDA" in client.cancelled
+
+
+def test_management_3_55pm_takes_priority_over_other_triggers():
+    # Time is past 3:55 AND SPY just broke VWAP — 3:55 wins.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[_filled_buy_order(), _open_stop_order()])
+    now = _et_dt(date(2026, 5, 28), time(16, 0))
+    # SPY 5-min with a fresh below-VWAP close.
+    spy = pd.DataFrame(
+        {"close": [400.0, 399.0, 398.0], "vwap": [400.5, 400.5, 400.5]},
+        index=pd.DatetimeIndex([
+            datetime(2026, 5, 28, 14, 5, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 15, tzinfo=_UTC),
+        ]),
+    )
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=spy,
+    )
+    assert res["action"] == "hard_close_355pm"
+
+
+def test_management_spy_vwap_break_hard_exit():
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 30))
+    # 3 SPY bars: two after fill_time. Final two close BELOW their VWAP.
+    # Last bar is in-progress (dropped). Penultimate is "closed" and triggers.
+    spy = pd.DataFrame(
+        {"close": [400.0, 399.0, 398.0],
+         "vwap":  [400.5, 400.5, 400.5]},
+        index=pd.DatetimeIndex([
+            datetime(2026, 5, 28, 14, 5, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 15, tzinfo=_UTC),  # in-progress (dropped)
+        ]),
+    )
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=spy,
+    )
+    assert res is not None
+    assert res["action"] == "hard_exit_spy_vwap_break"
+    assert res["close_order_id"] is not None
+
+
+def test_management_spy_vwap_break_ignores_bars_before_entry():
+    # SPY broke VWAP at 13:55 — BEFORE our 14:00 fill. Should not trigger.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 30))
+    spy = pd.DataFrame(
+        {"close": [399.0, 401.0, 400.0],
+         "vwap":  [400.0, 400.0, 400.0]},
+        index=pd.DatetimeIndex([
+            datetime(2026, 5, 28, 13, 55, tzinfo=_UTC),  # before entry
+            datetime(2026, 5, 28, 14, 5, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),  # in-progress (dropped)
+        ]),
+    )
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=spy,
+    )
+    # No action — pre-entry break doesn't count.
+    assert res is None
+
+
+def test_management_tp1_fill_moves_stop_to_breakeven():
+    pos = _open_position(qty=3, avg_entry=100.0)  # 5 - 2 (TP1 took 2) = 3 remaining
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=99.0),
+        _filled_limit_sell(qty=2, filled_at=datetime(2026, 5, 28, 14, 10, tzinfo=_UTC)),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 30))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is not None
+    assert res["action"] == "breakeven_move"
+    assert res["success"] is True
+    assert res["stop_price"] == 100.0  # avg_entry
+    assert res["qty"] == 3
+    # Old stop cancelled, new stop submitted.
+    assert "stop-NVDA" in client.cancelled
+
+
+def test_management_tp1_already_at_breakeven_no_action():
+    # Stop already at or above avg_entry — don't re-place.
+    pos = _open_position(qty=3, avg_entry=100.0)
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=100.0),  # already at BE
+        _filled_limit_sell(qty=2, filled_at=datetime(2026, 5, 28, 14, 10, tzinfo=_UTC)),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 30))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+
+
+def test_management_time_stop_fires_after_30_min_below_threshold():
+    # Fill at 14:00. Now 14:35 (35 min). Entry 100, stop 99 → R=1, threshold
+    # entry + 0.25R = 100.25. Current price 100.10 < 100.25 → time stop fires.
+    pos = _open_position(qty=5, avg_entry=100.0, current=100.10)
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=99.0),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 35))  # 14:35 UTC
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is not None
+    assert res["action"] == "time_stop"
+    assert res["close_order_id"] is not None
+    assert "time stop" in res["reason"]
+
+
+def test_management_time_stop_does_not_fire_if_progress_made():
+    # Same as above but current price 100.50 ≥ entry+0.25R → no time stop.
+    pos = _open_position(qty=5, avg_entry=100.0, current=100.50)
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=99.0),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 35))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+
+
+def test_management_time_stop_does_not_fire_before_30_min():
+    pos = _open_position(qty=5, avg_entry=100.0, current=100.10)
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=99.0),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 25))  # 14:25 UTC = 25 min
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+
+
+def test_management_time_stop_skipped_after_tp1_fills():
+    # TP1 has already fired → strategy says we already made +1R, skip
+    # time stop and let the BE stop handle the rest.
+    pos = _open_position(qty=3, avg_entry=100.0, current=100.10)
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(stop_price=100.0),  # already at BE
+        _filled_limit_sell(qty=2, filled_at=datetime(2026, 5, 28, 14, 10, tzinfo=_UTC)),
+    ])
+    now = _et_dt(date(2026, 5, 28), time(10, 40))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    # No time stop — TP1 fill exempts. Stop already at BE so no breakeven_move either.
+    assert res is None
+
+
+def test_management_no_entry_fill_bails_safely():
+    # Position exists but no matching BUY order found — bail rather than
+    # misbehave on weird Alpaca state.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[_open_stop_order()])  # no buy
+    now = _et_dt(date(2026, 5, 28), time(10, 30))
+    res = manage_position(
+        client=client, position=pos, now_et=now,
+        spy_5min_with_indicators=None,
+    )
+    assert res is None

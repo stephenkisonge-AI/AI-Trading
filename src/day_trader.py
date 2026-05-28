@@ -1,6 +1,7 @@
-"""Phase D5a — auto-execution layer for the day-trade strategy.
+"""Phases D5a + D5b — auto-execution + in-trade management for the
+day-trade strategy.
 
-Called by the day-watcher when a setup qualifies AND
+D5a (entries): called by the day-watcher when a setup qualifies AND
 WATCHER_DAY_AUTO_EXECUTE=true. Places a 4-order bundle:
     1. Market entry (BUY)
     2. Wait for fill
@@ -8,22 +9,33 @@ WATCHER_DAY_AUTO_EXECUTE=true. Places a 4-order bundle:
     4. TP1 limit SELL (50% qty, DAY) at +1R
     5. TP2 limit SELL (50% qty, DAY) at +2R
 
+D5b (management): runs at the TOP of every intraday scan before the
+entry pass, so any closes free the position slot. For the (at most)
+one open position, applies in priority order:
+    1. 3:55 PM exit  — close at market, cancel resting orders.
+    2. SPY-VWAP break — close at market if SPY 5-min closed below its
+       session VWAP after our entry filled.
+    3. TP1 fill detected — cancel original stop, place new stop-market
+       at avg_entry_price (breakeven).
+    4. Time stop — if (now − fill_time) ≥ 30 min AND current price <
+       entry + 0.25R, close at market.
+    (Circuit-breaker halt detection is intentionally deferred — Alpaca
+    doesn't expose a clean "halted" status on the position side.)
+
 Safety contract:
     - Refuses to act unless ALPACA_PAPER_TRADE=True. Live trading is
       always manual (the doc's two-switch promise).
     - Runs all pre-execution gates from Day_Trading_Strategy.md §"Risk
       caps" before placing the entry. Failures return a SkipDecision
       with the reason; the watcher logs it.
-    - Never raises out of `place_entry_bundle` — partial-bundle
-      failures are captured in the returned dict with
-      `protective_orders_complete=False` so the caller can fire an
-      urgent Telegram alert.
+    - Never raises out of `place_entry_bundle` or `manage_position` —
+      partial-bundle failures are captured in the returned dict so the
+      caller can fire an urgent Telegram alert.
 
-Phase D5a scope (deferred to later sub-phases):
-    - Weekly loss cap and consecutive-loss cooldown need realized-P&L
-      reconstruction — they land in D5c alongside lifecycle stats.
-    - In-trade management (TP1 → breakeven, time stop, hard exits) is
-      D5b.
+Deferred to D5c:
+    - Weekly loss cap and consecutive-loss cooldown (need realized-P&L
+      reconstruction from order history).
+    - Per-scan lifecycle stats block.
 """
 from __future__ import annotations
 
@@ -57,6 +69,16 @@ _MAX_TRADES_PER_SESSION = 3
 _DAILY_LOSS_CAP_PCT = 0.015  # -1.5% from prior session equity
 _FILL_POLL_TIMEOUT_SEC = 30
 _FILL_POLL_INTERVAL_SEC = 1
+
+# --- D5b management tunables ---------------------------------------------
+# 3:55 PM ET hard close — all positions flat by 4:00 PM.
+_HARD_CLOSE_TIME_ET = _time(15, 55)
+# Time stop: if no progress 30 min after fill AND price < entry + 0.25R.
+_TIME_STOP_MINUTES = 30
+_TIME_STOP_R_FRACTION = 0.25
+# Order-history lookback when reconstructing position state from Alpaca
+# (find fill_time, find original stop). 1 day is enough for intraday.
+_ORDER_HISTORY_LOOKBACK_DAYS = 1
 # -------------------------------------------------------------------------
 
 UNIVERSE = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"]
@@ -318,3 +340,317 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
         "order_ids": order_ids,
         "errors": errors,
     }
+
+
+# =========================================================================
+# Phase D5b — in-trade management
+# =========================================================================
+
+
+def _list_orders_since(client, symbol: str, since: datetime, statuses=None):
+    """Fetch orders for `symbol` filled/created since `since` UTC.
+
+    Default returns all statuses (open + closed). Filtering by side or
+    status happens at the call site so the helper stays general.
+    """
+    request = GetOrdersRequest(
+        status=QueryOrderStatus.ALL,
+        after=since,
+        symbols=[symbol],
+        limit=100,
+    )
+    return list(client.get_orders(filter=request))
+
+
+def _find_entry_fill(client, symbol: str, now_utc: datetime):
+    """Find the most recent filled BUY order for `symbol`. Returns the
+    order object or None.
+
+    Used to derive fill_time (for the time stop) and to anchor "since
+    entry" predicates.
+    """
+    since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
+    orders = _list_orders_since(client, symbol, since)
+    fills = [
+        o for o in orders
+        if str(getattr(o, "side", "")).lower().endswith("buy")
+        and getattr(o, "filled_at", None) is not None
+    ]
+    if not fills:
+        return None
+    # Most recent fill — assume single intraday position.
+    fills.sort(key=lambda o: o.filled_at, reverse=True)
+    return fills[0]
+
+
+def _find_resting_stop(client, symbol: str, now_utc: datetime):
+    """Return the (single) resting stop SELL order for `symbol`, or None.
+
+    The day-trade entry bundle places exactly one stop-market SELL.
+    """
+    since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
+    orders = _list_orders_since(client, symbol, since)
+    for o in orders:
+        is_open = str(getattr(o, "status", "")).lower().split(".")[-1] in (
+            "new", "accepted", "pending_new", "accepted_for_bidding",
+            "held", "partially_filled",
+        )
+        is_sell = str(getattr(o, "side", "")).lower().endswith("sell")
+        is_stop = str(getattr(o, "order_type", "")).lower().endswith("stop")
+        if is_open and is_sell and is_stop:
+            return o
+    return None
+
+
+def _detect_tp1_filled(client, symbol: str, since: datetime) -> bool:
+    """True if a non-stop limit SELL has filled for `symbol` since `since`.
+
+    A filled limit-sell is unambiguous evidence TP1 fired — the entry
+    bundle only places limit SELLs at TP1 / TP2 prices, and TP1 fires
+    first by construction (lower price).
+    """
+    orders = _list_orders_since(client, symbol, since)
+    for o in orders:
+        is_filled = getattr(o, "filled_at", None) is not None
+        is_sell = str(getattr(o, "side", "")).lower().endswith("sell")
+        is_limit = str(getattr(o, "order_type", "")).lower().endswith("limit")
+        is_not_stop = "stop" not in str(getattr(o, "order_type", "")).lower()
+        if is_filled and is_sell and is_limit and is_not_stop:
+            return True
+    return False
+
+
+def _cancel_resting_orders(client, symbol: str, now_utc: datetime) -> list[str]:
+    """Cancel all open orders for `symbol`. Returns list of cancelled IDs.
+
+    Best-effort: individual cancel failures don't abort the loop — the
+    caller can still proceed to close the position.
+    """
+    since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
+    orders = _list_orders_since(client, symbol, since)
+    cancelled: list[str] = []
+    for o in orders:
+        is_open = str(getattr(o, "status", "")).lower().split(".")[-1] in (
+            "new", "accepted", "pending_new", "accepted_for_bidding",
+            "held", "partially_filled",
+        )
+        if not is_open:
+            continue
+        try:
+            client.cancel_order_by_id(o.id)
+            cancelled.append(str(o.id))
+        except Exception:
+            # Best-effort. Log nothing — D5b summary captures aggregate.
+            pass
+    return cancelled
+
+
+def _close_position_market(client, symbol: str, position, reason: str,
+                           now_utc: datetime) -> dict:
+    """Cancel all open orders for `symbol`, then market-sell the qty.
+
+    Mirrors the crypto pattern. Never raises — failures captured in the
+    returned dict.
+    """
+    cancelled = _cancel_resting_orders(client, symbol, now_utc)
+    qty = float(getattr(position, "qty", 0))
+    out: dict = {
+        "reason": reason, "cancelled_orders": cancelled,
+        "close_order_id": None, "qty": qty, "error": None,
+    }
+    try:
+        order = client.submit_order(MarketOrderRequest(
+            symbol=symbol, qty=qty, side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        ))
+        out["close_order_id"] = str(order.id)
+    except Exception as exc:
+        out["error"] = f"close submit failed: {exc}"
+    return out
+
+
+def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
+                            remaining_qty: float) -> dict:
+    """Cancel old stop, place new stop-market at avg_entry_price for the
+    given remaining qty.
+
+    `remaining_qty` is passed in rather than read from `position.qty`
+    because position.qty reflects pre-TP1-fill quantity in some Alpaca
+    snapshots — caller computes it from the now-known fill events.
+    """
+    avg_entry = float(getattr(position, "avg_entry_price", 0) or 0)
+    if avg_entry <= 0:
+        return {"success": False, "error": "missing avg_entry_price"}
+    stop_px = round(avg_entry, 2)
+    out: dict = {
+        "old_stop_order_id": str(getattr(old_stop, "id", "")),
+        "old_stop_price": float(getattr(old_stop, "stop_price", 0) or 0),
+        "new_stop_order_id": None, "stop_price": stop_px,
+        "qty": remaining_qty, "success": False, "error": None,
+    }
+    try:
+        client.cancel_order_by_id(old_stop.id)
+    except Exception as exc:
+        out["error"] = f"cancel old stop failed: {exc}"
+        return out
+    try:
+        new_stop = client.submit_order(StopOrderRequest(
+            symbol=symbol, qty=remaining_qty, side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+            stop_price=stop_px,
+        ))
+        out["new_stop_order_id"] = str(new_stop.id)
+        out["success"] = True
+    except Exception as exc:
+        out["error"] = (
+            f"new stop submit failed: {exc} "
+            f"(OLD STOP CANCELLED — POSITION TEMPORARILY UNPROTECTED)"
+        )
+    return out
+
+
+def _spy_broke_vwap_after(spy_5min_with_indicators, entry_fill_time_utc: datetime) -> bool:
+    """True if any closed SPY 5-min bar AFTER our entry fill closed below
+    its session VWAP.
+
+    `spy_5min_with_indicators` is already pulled + computed by the
+    watcher — re-using it here avoids a second Alpaca round-trip.
+    """
+    if spy_5min_with_indicators is None or len(spy_5min_with_indicators) == 0:
+        return False
+    df = spy_5min_with_indicators
+    # Index is tz-aware UTC. Drop in-progress (last) bar — only closed
+    # bars count for hard exits.
+    if len(df) < 2:
+        return False
+    closed = df.iloc[:-1]
+    after_entry = closed[closed.index > entry_fill_time_utc]
+    if len(after_entry) == 0:
+        return False
+    return bool((after_entry["close"] < after_entry["vwap"]).any())
+
+
+def manage_position(
+    *,
+    client,
+    position,
+    now_et: datetime,
+    spy_5min_with_indicators,
+) -> dict | None:
+    """Apply the day-trade management rules in priority order.
+
+    Returns an action dict if something was done, else None.
+    Priority: 3:55 close → SPY-VWAP break → TP1→breakeven → time stop.
+
+    Caller is responsible for iterating over open positions; this
+    function handles one position at a time.
+    """
+    symbol = getattr(position, "symbol", None)
+    if not symbol:
+        return None
+
+    now_utc = now_et.astimezone(timezone.utc)
+    et_clock = now_et.astimezone(ET).time()
+
+    # --- 1. 3:55 PM hard close ---
+    if et_clock >= _HARD_CLOSE_TIME_ET:
+        res = _close_position_market(
+            client, symbol, position,
+            reason=f"3:55 PM hard close (now {et_clock.strftime('%H:%M')} ET)",
+            now_utc=now_utc,
+        )
+        return {"action": "hard_close_355pm", "symbol": symbol, **res}
+
+    # Reconstruct entry fill — needed for SPY-VWAP-after-entry check
+    # AND for time stop.
+    entry_fill = _find_entry_fill(client, symbol, now_utc)
+    if entry_fill is None:
+        # Position exists but no recent BUY fill — could be a manually
+        # opened position or an Alpaca lag. Bail rather than misbehave.
+        return None
+    fill_time_utc = entry_fill.filled_at.astimezone(timezone.utc) \
+        if entry_fill.filled_at.tzinfo else entry_fill.filled_at.replace(tzinfo=timezone.utc)
+    avg_entry = float(getattr(position, "avg_entry_price", 0) or 0)
+
+    # --- 2. SPY VWAP break after our entry ---
+    if _spy_broke_vwap_after(spy_5min_with_indicators, fill_time_utc):
+        res = _close_position_market(
+            client, symbol, position,
+            reason="SPY 5-min close below session VWAP after entry",
+            now_utc=now_utc,
+        )
+        return {"action": "hard_exit_spy_vwap_break", "symbol": symbol, **res}
+
+    # --- 3. TP1 fill → move stop to breakeven ---
+    tp1_filled = _detect_tp1_filled(client, symbol, fill_time_utc)
+    resting_stop = _find_resting_stop(client, symbol, now_utc)
+    if tp1_filled and resting_stop is not None:
+        stop_px = float(getattr(resting_stop, "stop_price", 0) or 0)
+        # Only move if the current stop is BELOW avg_entry — i.e. we
+        # haven't already moved it to breakeven on a prior scan.
+        if stop_px < avg_entry:
+            remaining_qty = float(getattr(position, "qty", 0))
+            rep = _move_stop_to_breakeven(
+                client, symbol, position, resting_stop, remaining_qty,
+            )
+            return {"action": "breakeven_move", "symbol": symbol, **rep}
+
+    # --- 4. Time stop: 30 min after fill AND price < entry + 0.25R ---
+    minutes_since_fill = (now_utc - fill_time_utc).total_seconds() / 60.0
+    if minutes_since_fill >= _TIME_STOP_MINUTES and not tp1_filled:
+        # Recover R from the resting stop if we still have it.
+        r_value = None
+        if resting_stop is not None and avg_entry > 0:
+            stop_px = float(getattr(resting_stop, "stop_price", 0) or 0)
+            r_value = avg_entry - stop_px if stop_px > 0 else None
+        if r_value is not None and r_value > 0:
+            current_price = float(getattr(position, "current_price", 0) or 0)
+            if current_price > 0 and current_price < avg_entry + _TIME_STOP_R_FRACTION * r_value:
+                res = _close_position_market(
+                    client, symbol, position,
+                    reason=(
+                        f"time stop: {int(minutes_since_fill)} min since fill, "
+                        f"price {current_price:.2f} < entry+0.25R "
+                        f"{avg_entry + _TIME_STOP_R_FRACTION * r_value:.2f}"
+                    ),
+                    now_utc=now_utc,
+                )
+                return {"action": "time_stop", "symbol": symbol, **res}
+
+    return None
+
+
+def manage_open_positions(
+    *,
+    now_et: datetime,
+    spy_5min_with_indicators,
+    client=None,
+) -> list[dict]:
+    """Run management over all open positions. Strategy doc caps at 1
+    position; the loop handles N anyway for robustness.
+
+    Returns a list of action dicts; empty list when nothing was done.
+    """
+    if client is None:
+        client = get_client()
+    try:
+        positions = client.get_all_positions()
+    except Exception as exc:
+        return [{"action": "error", "error": f"could not fetch positions: {exc}"}]
+
+    actions: list[dict] = []
+    for pos in positions:
+        try:
+            res = manage_position(
+                client=client, position=pos, now_et=now_et,
+                spy_5min_with_indicators=spy_5min_with_indicators,
+            )
+            if res is not None:
+                actions.append(res)
+        except Exception as exc:
+            actions.append({
+                "action": "error",
+                "symbol": getattr(pos, "symbol", "?"),
+                "error": f"management crashed: {exc}",
+            })
+    return actions
