@@ -65,6 +65,14 @@ if paper performance is strong, I will sit with results for at least
   in GitHub Secrets enables the autonomous watcher. Anything else
   (unset, "false", empty) keeps the watcher in alerts-only mode where
   Telegram pings me about qualifying setups but no orders are placed.
+- **Expectancy circuit breaker:** When the lifecycle stats show
+  `mean_r < +0.20R` after at least 50 closed trades, the watcher
+  automatically refuses new entries — even with `WATCHER_DAY_AUTO_EXECUTE=true`.
+  Existing positions are still managed normally. To override (e.g.,
+  to continue trading while reviewing the data), set
+  `WATCHER_DAY_OVERRIDE_EXPECTANCY=true` in GitHub Secrets. Only the
+  literal string "true" overrides — `1`, `yes`, etc. are ignored
+  intentionally so the protection isn't disabled by accident.
 
 ---
 

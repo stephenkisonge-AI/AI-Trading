@@ -880,3 +880,106 @@ def test_entry_bundle_sets_client_order_id_for_setup_tagging():
     entry_req, _ = client.submitted[0]
     assert hasattr(entry_req, "client_order_id")
     assert entry_req.client_order_id.startswith("DAY-A-NVDA-")
+
+
+# ---------------------------------------------------------------------------
+# Expectancy circuit breaker
+# ---------------------------------------------------------------------------
+
+
+def test_gate_no_lifecycle_stats_passes_through():
+    """When lifecycle_stats is None, expectancy gate is skipped."""
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000, lifecycle_stats=None,
+    )
+    assert decision.allowed is True
+
+
+def test_gate_lifecycle_with_error_field_fails_open():
+    """Lifecycle fetch failed — that's a data problem, not a strategy
+    violation. Gate must NOT block on stats errors.
+    """
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={"error": "alpaca timeout", "days_back": 90},
+    )
+    assert decision.allowed is True
+
+
+def test_gate_clean_lifecycle_passes():
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={"expectancy_warning": None, "total_closed": 100},
+    )
+    assert decision.allowed is True
+
+
+def test_gate_expectancy_warning_blocks_new_entries(monkeypatch):
+    monkeypatch.delenv("WATCHER_DAY_OVERRIDE_EXPECTANCY", raising=False)
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={
+            "expectancy_warning": "mean R -0.30R below +0.2R after 50 trades",
+            "total_closed": 50,
+        },
+    )
+    assert decision.allowed is False
+    assert "expectancy_circuit_breaker" in decision.reason
+    assert "WATCHER_DAY_OVERRIDE_EXPECTANCY" in decision.reason
+
+
+def test_gate_expectancy_override_allows_through(monkeypatch):
+    monkeypatch.setenv("WATCHER_DAY_OVERRIDE_EXPECTANCY", "true")
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={
+            "expectancy_warning": "mean R -0.30R below +0.2R after 50 trades",
+            "total_closed": 50,
+        },
+    )
+    assert decision.allowed is True
+
+
+def test_gate_expectancy_override_only_honors_true(monkeypatch):
+    """Any value other than literal 'true' (case-insensitive) leaves the
+    circuit breaker active. Guards against `=1`, `=yes`, `=on` etc.
+    accidentally disabling the protection.
+    """
+    monkeypatch.setenv("WATCHER_DAY_OVERRIDE_EXPECTANCY", "1")
+    client = FakeClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={
+            "expectancy_warning": "mean R -0.30R below +0.2R after 50 trades",
+            "total_closed": 50,
+        },
+    )
+    assert decision.allowed is False
+
+
+def test_gate_expectancy_runs_before_alpaca_calls(monkeypatch):
+    """Expectancy circuit breaker should fire BEFORE the gate hits Alpaca
+    for the session-cap check. Verify by giving a client whose
+    get_orders would raise — if the breaker fires first, we never call it.
+    """
+    monkeypatch.delenv("WATCHER_DAY_OVERRIDE_EXPECTANCY", raising=False)
+
+    class ExplodingClient(FakeClient):
+        def get_orders(self, filter=None):
+            raise RuntimeError("session-cap check should never run")
+
+    client = ExplodingClient(equity=100_000)
+    decision = check_pre_execution_gates(
+        client, _setup_result(), equity=100_000,
+        lifecycle_stats={
+            "expectancy_warning": "mean R -0.50R below +0.2R after 60 trades",
+            "total_closed": 60,
+        },
+    )
+    assert decision.allowed is False
+    assert "expectancy_circuit_breaker" in decision.reason

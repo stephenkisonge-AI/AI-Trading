@@ -407,6 +407,15 @@ def run_intraday_scan(now_et: datetime) -> dict:
         send_alert(f"⚠️ day-watcher could not fetch positions: {exc}")
         return {"phase": "intraday_scan", "error": "positions_fetch_failed"}
 
+    # D5c — lifecycle stats reconstructed from order history. Computed
+    # ONCE per scan and threaded into the entry gate (the expectancy
+    # circuit breaker reads expectancy_warning from this dict). Stats
+    # are appended to the end-of-scan no-qualifying-setups Telegram.
+    try:
+        lifecycle = summarize_day_lifecycle(client=client)
+    except Exception as exc:
+        lifecycle = {"error": f"summarize crashed: {exc}", "days_back": 90}
+
     today_et = now_et.astimezone(ET).date()
     scan_results: list[dict] = []
     skipped_counter: dict[str, int] = {}
@@ -457,6 +466,7 @@ def run_intraday_scan(now_et: datetime) -> dict:
                         equity = float(client.get_account().equity)
                         gate = check_pre_execution_gates(
                             client, setup_result, equity=equity,
+                            lifecycle_stats=lifecycle,
                         )
                         if not gate.allowed:
                             send_alert(
@@ -506,14 +516,6 @@ def run_intraday_scan(now_et: datetime) -> dict:
             print(f"[day-watcher] error scanning {sym}: {exc}\n{tb}",
                   file=sys.stderr)
             send_alert(f"⚠️ day-watcher error on {sym}: {exc}")
-
-    # D5c — lifecycle stats reconstructed from order history each scan.
-    # Best-effort: failures surface as an inline "error" field, never
-    # block the scan.
-    try:
-        lifecycle = summarize_day_lifecycle(client=client)
-    except Exception as exc:
-        lifecycle = {"error": f"summarize crashed: {exc}", "days_back": 90}
 
     qualifying = [r for r in scan_results if r["qualified_setup"] is not None]
     if not qualifying:

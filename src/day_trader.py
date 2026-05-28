@@ -91,6 +91,11 @@ _MIN_SAMPLE_FOR_EXPECTANCY = 50
 # client_order_id prefix used to tag entry BUYs with setup type — parsed
 # back out during lifecycle reconstruction.
 _CLIENT_ORDER_ID_PREFIX = "DAY"
+# Env var that lets the user override the expectancy circuit breaker.
+# When the lifecycle expectancy_warning fires, new entries are refused
+# unless this is set to "true". Existing positions are still managed
+# normally. Doc: Day_Trading_Strategy.md §"Reminder to myself".
+_OVERRIDE_EXPECTANCY_ENV_VAR = "WATCHER_DAY_OVERRIDE_EXPECTANCY"
 # -------------------------------------------------------------------------
 
 UNIVERSE = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"]
@@ -183,16 +188,64 @@ def _gate_daily_loss(client) -> Optional[SkipDecision]:
     return None
 
 
-def check_pre_execution_gates(client, setup_result: dict, equity: float) -> SkipDecision:
+def _gate_expectancy_warning(lifecycle_stats: dict | None) -> Optional[SkipDecision]:
+    """Refuse new entries when the lifecycle expectancy_warning is active,
+    unless the user has explicitly overridden via env var.
+
+    Returns None to mean "proceed" (no warning, or override active, or
+    no stats available). Returns SkipDecision when the circuit breaker
+    should trip.
+
+    Fail-open posture:
+    - When lifecycle_stats is None or has an error field, this gate is
+      skipped. The lifecycle fetch failing isn't itself a reason to
+      block trading — that's a data-availability problem, not a
+      strategy violation.
+    """
+    if lifecycle_stats is None:
+        return None
+    if lifecycle_stats.get("error"):
+        return None
+    warning = lifecycle_stats.get("expectancy_warning")
+    if not warning:
+        return None
+    if os.environ.get(_OVERRIDE_EXPECTANCY_ENV_VAR, "").lower() == "true":
+        return None
+    return SkipDecision(
+        False,
+        f"expectancy_circuit_breaker: {warning} "
+        f"(set {_OVERRIDE_EXPECTANCY_ENV_VAR}=true to override)",
+    )
+
+
+def check_pre_execution_gates(
+    client,
+    setup_result: dict,
+    equity: float,
+    lifecycle_stats: dict | None = None,
+) -> SkipDecision:
     """Returns SkipDecision(allowed=True, reason="") when the trade may
     proceed, else SkipDecision(allowed=False, reason="..."). Order of
     checks is deliberate — cheapest first, so we minimize Alpaca calls
     on the no-trade path.
+
+    `lifecycle_stats` is the dict returned by summarize_day_lifecycle.
+    When provided AND its expectancy_warning is active AND the user
+    has not set WATCHER_DAY_OVERRIDE_EXPECTANCY=true, new entries are
+    refused. Pass None to bypass the expectancy gate entirely (used by
+    tests).
     """
-    # Strategy hygiene first — would the setup itself sizing be valid.
+    # Strategy hygiene first — is the sizing valid.
     sizing = compute_position_size(equity, setup_result["entry"], setup_result["stop"])
     if "skip_reason" in sizing:
         return SkipDecision(False, sizing["skip_reason"])
+
+    # Expectancy circuit breaker — checked before any Alpaca calls so the
+    # rejection path stays cheap. lifecycle_stats was already computed
+    # once at the top of the scan, so this gate is essentially free.
+    expectancy_skip = _gate_expectancy_warning(lifecycle_stats)
+    if expectancy_skip is not None:
+        return expectancy_skip
 
     # Session-cap check.
     try:
