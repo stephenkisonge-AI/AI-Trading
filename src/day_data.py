@@ -17,6 +17,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
 import pandas as pd
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -57,11 +58,18 @@ def get_stock_bars(
         )
 
     client = _get_stock_data_client()
+    # feed=IEX is mandatory on the free tier. Without it alpaca-py
+    # defaults to SIP, which the free subscription rejects for any
+    # recent (last 15 min) data with:
+    #   "subscription does not permit querying recent SIP data"
+    # Strategy doc §"Data fidelity note" already accepts the IEX-only
+    # caveat — this just makes the request explicit.
     request = StockBarsRequest(
         symbol_or_symbols=symbol,
         timeframe=_TIMEFRAME_MAP[timeframe],
         start=start,
         end=end,
+        feed=DataFeed.IEX,
     )
     barset = client.get_stock_bars(request)
     df = barset.df
