@@ -58,8 +58,12 @@ STOCKS = {"NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT"}  # GLD exempt from ea
 
 ET = ZoneInfo("America/New_York")
 
-# Phase windows in ET.
-_PRE_SESSION_START = time(9, 0)
+# Phase windows in ET. Pre-session is a single-tick window so only the
+# 9:25 ET cron firing sends a summary — earlier ticks (9:00-9:20) are
+# PHASE_OUTSIDE and no-op. This keeps the Telegram thread quiet:
+# previously the watcher fired the same pre-session summary 6 times
+# every morning.
+_PRE_SESSION_START = time(9, 25)
 _PRE_SESSION_END = time(9, 30)
 _INTRADAY_SCAN_START = time(9, 45)
 _INTRADAY_SCAN_END = time(15, 55)

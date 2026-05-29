@@ -49,12 +49,20 @@ def _fresh_econ(events: list[tuple[str, datetime]] | None = None) -> EconEventsP
 # ---------------------------------------------------------------------------
 
 
-def test_phase_pre_session_at_925():
+def test_phase_pre_session_only_fires_at_925():
+    # Pre-session is a single-tick window [9:25, 9:30) — exactly one cron
+    # firing per weekday morning sends the summary.
     assert determine_phase(_et(date(2026, 5, 27), time(9, 25))) is PHASE_PRE_SESSION
 
 
-def test_phase_pre_session_boundary_at_900_inclusive():
-    assert determine_phase(_et(date(2026, 5, 27), time(9, 0))) is PHASE_PRE_SESSION
+def test_phase_outside_before_925():
+    # Earlier ticks in the cron window (9:00-9:20 ET) used to fire the
+    # full pre-session summary too — leading to 6 redundant Telegrams
+    # per morning. They now map to PHASE_OUTSIDE and no-op.
+    assert determine_phase(_et(date(2026, 5, 27), time(9, 0))) is PHASE_OUTSIDE
+    assert determine_phase(_et(date(2026, 5, 27), time(9, 20))) is PHASE_OUTSIDE
+    # 9:24 is the last tick before the window opens — still OUTSIDE.
+    assert determine_phase(_et(date(2026, 5, 27), time(9, 24))) is PHASE_OUTSIDE
 
 
 def test_phase_pre_session_boundary_at_930_exclusive():
