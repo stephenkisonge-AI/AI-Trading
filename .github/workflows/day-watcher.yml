@@ -1,14 +1,20 @@
 name: Day Watcher
 
 on:
+  # PRIMARY TRIGGER — external cron via cron-job.org POSTs to GitHub's
+  # /repos/{owner}/{repo}/dispatches API every 5 min during US market
+  # hours (Mon-Fri). External cron is required because GH Actions
+  # free-tier scheduler is best-effort and drops the vast majority of
+  # */5 ticks (observed: ~1 fire/day vs ~80 expected).
+  repository_dispatch:
+    types: [day-watcher-tick]
+  # BACKUP — keep the native schedule too. When external cron is up
+  # both triggers fire and the second one cheaply no-ops on the
+  # already-running scan. When external cron is down, the native
+  # schedule provides at least some coverage.
   schedule:
-    # Every 5 minutes from 13:00 to 20:59 UTC, Monday-Friday. Window is
-    # deliberately wider than the actual ET trading session (9:30-16:00)
-    # to accommodate both EDT (13:30-20:00 UTC) and EST (14:30-21:00 UTC)
-    # without DST-aware switching. The watcher's determine_phase() filters
-    # out PHASE_OUTSIDE ticks early — they consume a cron trigger but
-    # do almost no work. Approx ~480 ticks/week.
     - cron: '*/5 13-20 * * 1-5'
+  # MANUAL — for test_ping and ad-hoc verification.
   workflow_dispatch:
     inputs:
       test_ping:
