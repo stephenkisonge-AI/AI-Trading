@@ -31,7 +31,7 @@ from src.day_calendar import (
 from src.day_data import get_pre_market_high_low, get_stock_bars
 from src.day_indicators import bar_rvol, session_rvol, session_vwap
 from src.day_notifier import (
-    format_no_qualifying_setups,
+    format_end_of_session_summary,
     format_pre_session_summary,
     format_setup_alert,
 )
@@ -67,6 +67,12 @@ _PRE_SESSION_START = time(9, 25)
 _PRE_SESSION_END = time(9, 30)
 _INTRADAY_SCAN_START = time(9, 45)
 _INTRADAY_SCAN_END = time(15, 55)
+
+# End-of-session summary window — single 5-min tick. The 15:50 ET cron
+# firing sends one daily wrap-up alert (skip patterns + lifecycle stats).
+# Other intraday ticks no-op on Telegram and log only to stdout.
+_END_OF_SESSION_START = time(15, 50)
+_END_OF_SESSION_END = time(15, 55)
 
 
 @dataclass(frozen=True)
@@ -523,13 +529,27 @@ def run_intraday_scan(now_et: datetime) -> dict:
             send_alert(f"⚠️ day-watcher error on {sym}: {exc}")
 
     qualifying = [r for r in scan_results if r["qualified_setup"] is not None]
-    if not qualifying:
-        send_alert(format_no_qualifying_setups(
+
+    # End-of-session summary at the 15:50 ET tick (last intraday tick
+    # before the 15:55 hard close). Other ticks just log to stdout —
+    # per-setup alerts already fire individually in real-time, so a
+    # per-tick "no qualifying setups" Telegram was pure noise.
+    clock = now_et.astimezone(ET).time()
+    is_end_of_session = _END_OF_SESSION_START <= clock < _END_OF_SESSION_END
+    if is_end_of_session:
+        send_alert(format_end_of_session_summary(
             now_et=now_et.astimezone(ET),
             candidates_scanned=len(scan_results),
             skipped_summary=skipped_counter,
+            qualified_count=len(qualifying),
             lifecycle_stats=lifecycle,
         ))
+    else:
+        # Stdout-only debug summary — visible in GH Actions logs, not Telegram.
+        print(
+            f"[day-watcher] scan complete: scanned={len(scan_results)} "
+            f"qualified={len(qualifying)} skipped={dict(skipped_counter)}"
+        )
 
     return {
         "phase": "intraday_scan",
@@ -537,6 +557,7 @@ def run_intraday_scan(now_et: datetime) -> dict:
         "qualified": len(qualifying),
         "skipped": skipped_counter,
         "lifecycle": lifecycle,
+        "sent_end_of_session_summary": is_end_of_session,
     }
 
 

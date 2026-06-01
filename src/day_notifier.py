@@ -157,23 +157,29 @@ def format_lifecycle_block(stats: dict) -> list[str]:
     return lines
 
 
-def format_no_qualifying_setups(
+def format_end_of_session_summary(
     *,
     now_et: datetime,
     candidates_scanned: int,
     skipped_summary: dict[str, int],
+    qualified_count: int,
     lifecycle_stats: dict | None = None,
 ) -> str:
-    """End-of-scan summary when nothing qualified. Skipped via Telegram
-    once per scan tick so absence-of-signal is still visible.
+    """Daily wrap-up sent once per session at the 15:50 ET tick. Shows the
+    final scan's skip-reason breakdown + cumulative lifecycle stats.
+
+    The qualified_count is the LATEST scan's qualified-setup count. Trades
+    that fired earlier in the day surfaced via individual setup alerts +
+    AUTO-EXEC follow-ups in real time, so the cumulative count for the day
+    isn't reproduced here (it lives in the lifecycle block's totals).
     """
     lines: list[str] = []
     lines.append(
-        f"⚪ Day-trade scan @ {now_et.strftime('%H:%M ET')} — no qualifying setups"
+        f"🏁 Day-trade end-of-session @ {now_et.strftime('%H:%M ET')}"
     )
-    lines.append(f"Candidates scanned: {candidates_scanned}")
+    lines.append(f"Final scan: scanned={candidates_scanned}, qualified={qualified_count}")
     if skipped_summary:
-        lines.append("Skip reasons:")
+        lines.append("Skip reasons (latest scan):")
         for reason, n in sorted(skipped_summary.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {reason}: {n}")
     if lifecycle_stats is not None:

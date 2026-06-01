@@ -90,6 +90,21 @@ def test_phase_outside_at_3am():
     assert determine_phase(_et(date(2026, 5, 27), time(3, 0))) is PHASE_OUTSIDE
 
 
+def test_end_of_session_window_includes_1550_excludes_1555():
+    """End-of-session summary only fires inside [15:50, 15:55) ET — the
+    single 5-min tick before the 15:55 hard close. Earlier intraday
+    ticks log to stdout only; 15:55 itself is PHASE_OUTSIDE.
+    """
+    from src.day_watcher import _END_OF_SESSION_START, _END_OF_SESSION_END
+    # The cron fires on 5-min boundaries. 15:50 is inside; 15:55 is the
+    # exclusive end so only one tick (15:50) lands in the window.
+    assert _END_OF_SESSION_START == time(15, 50)
+    assert _END_OF_SESSION_END == time(15, 55)
+    assert _END_OF_SESSION_START <= time(15, 50) < _END_OF_SESSION_END
+    assert not (_END_OF_SESSION_START <= time(15, 45) < _END_OF_SESSION_END)
+    assert not (_END_OF_SESSION_START <= time(15, 55) < _END_OF_SESSION_END)
+
+
 def test_phase_outside_during_dead_zone_is_actually_intraday():
     # The doc's "midday dead zone" 11:30-14:00 — for our phase logic
     # this is still PHASE_INTRADAY_SCAN, because the watcher's time-of-day
