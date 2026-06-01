@@ -460,6 +460,7 @@ def run_intraday_scan(now_et: datetime) -> dict:
                     intraday_character=classify_intraday_character(
                         spy_5min_with_ind
                     ),
+                    auto_execute=day_auto_execute_enabled(),
                 )
                 send_alert(msg)
                 # D5a — auto-execute if kill switch is set. Gates run

@@ -57,7 +57,13 @@ def format_pre_session_summary(
     return "\n".join(lines)
 
 
-def format_setup_alert(result: dict, *, daily_regime: str, intraday_character: str) -> str:
+def format_setup_alert(
+    result: dict,
+    *,
+    daily_regime: str,
+    intraday_character: str,
+    auto_execute: bool = False,
+) -> str:
     """Per-setup Telegram alert when a candidate qualifies 10/10.
 
     `result` matches the dict returned by evaluate_setup_a/b in
@@ -93,7 +99,11 @@ def format_setup_alert(result: dict, *, daily_regime: str, intraday_character: s
         mark = "✓" if cond["passed"] else "✗"
         lines.append(f"  {mark} {cond['name']}")
     lines.append("")
-    lines.append("⚠️ ALERTS-ONLY MODE — no orders placed.")
+    if auto_execute:
+        lines.append("🔄 AUTO-EXECUTE active — pre-execution gates will run next. "
+                     "Expect a follow-up FILLED / SKIP / FAILED alert.")
+    else:
+        lines.append("⚠️ ALERTS-ONLY MODE — no orders placed.")
     return "\n".join(lines)
 
 
