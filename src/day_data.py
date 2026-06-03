@@ -13,6 +13,7 @@ so the day-watcher can decide whether to skip a scan or alert.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Optional
 
@@ -98,17 +99,25 @@ def get_pre_market_high_low(
 
     Strategy doc: pre-market data is descriptive context only — never
     a setup trigger. Watcher proceeds without these levels on failure.
+
+    Failure reasons are printed to stderr so they're visible in the GH
+    Actions logs — the alert just shows "unavailable" but the logs
+    distinguish install gap vs Yahoo outage vs empty data.
     """
     try:
         import yfinance as yf  # local import — keeps the watcher tolerant
                                # of yfinance being absent in test envs
-    except ImportError:
+    except ImportError as exc:
+        print(f"[day_data] PMH/PML unavailable ({symbol}): yfinance not installed "
+              f"({exc}) — add to requirements.txt", file=sys.stderr)
         return None
 
     try:
         ticker = yf.Ticker(symbol)
         hist = ticker.history(period="5d", interval="1m", prepost=True)
         if hist is None or len(hist) == 0:
+            print(f"[day_data] PMH/PML unavailable ({symbol}): yfinance returned empty",
+                  file=sys.stderr)
             return None
 
         hist = hist.reset_index()
@@ -123,7 +132,11 @@ def get_pre_market_high_low(
         )
         pre = hist[same_day & before_open]
         if len(pre) == 0:
+            print(f"[day_data] PMH/PML unavailable ({symbol}): no pre-market bars "
+                  f"for {session_date_et}", file=sys.stderr)
             return None
         return float(pre["High"].max()), float(pre["Low"].min())
-    except Exception:
+    except Exception as exc:
+        print(f"[day_data] PMH/PML unavailable ({symbol}): yfinance error: {exc}",
+              file=sys.stderr)
         return None
