@@ -1,12 +1,8 @@
 {
   "_doc": "Tier-1 US economic events for the next ~35 days. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. datetime_et is the scheduled release time in ET with offset; the watcher's no-trade window is [event - 30 min, event + 30 min].",
-  "refreshed_at": "2026-05-31T08:33:23Z",
+  "refreshed_at": "2026-06-07T08:43:48Z",
   "source": "hardcoded_calendar",
   "events": [
-    {
-      "name": "NFP",
-      "datetime_et": "2026-06-05T08:30:00-04:00"
-    },
     {
       "name": "CPI",
       "datetime_et": "2026-06-10T08:30:00-04:00"

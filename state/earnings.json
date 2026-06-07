@@ -1,6 +1,6 @@
 {
   "_doc": "Upcoming earnings dates for the day-trade universe. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. Dates are ET local. Symbols not listed are exempt from the earnings filter (e.g., GLD).",
-  "refreshed_at": "2026-05-31T08:33:23Z",
+  "refreshed_at": "2026-06-07T08:43:48Z",
   "source": "finnhub_free",
   "earnings": {
     "NVDA": [
