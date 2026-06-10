@@ -137,6 +137,8 @@ class FakeClient:
         self.fill_price = fill_price
         self._order_seq = 0
         self._order_states: dict[str, str] = {}
+        self.closed_positions: list[str] = []
+        self.replaced: list[tuple[str, object]] = []
 
     # --- Alpaca-compatible API surface ---
 
@@ -164,6 +166,7 @@ class FakeClient:
             qty=getattr(request, "qty", None),
             filled_avg_price=None,
             filled_at=None,
+            legs=None,
         )
         # Market BUY auto-fills for the test path.
         is_market_buy = (
@@ -178,6 +181,21 @@ class FakeClient:
             # the fake.
             rec.status = "OrderStatus.FILLED"
             rec.filled_at = datetime(2026, 5, 27, 14, 30, tzinfo=timezone.utc)
+        # OCO orders: synthesize the stop-loss child leg so the producer can
+        # extract its id for later breakeven replacement.
+        order_class = getattr(request, "order_class", None)
+        is_oco = (
+            order_class is not None
+            and str(order_class).lower().endswith("oco")
+        )
+        if is_oco:
+            stop_loss = getattr(request, "stop_loss", None)
+            stop_leg = SimpleNamespace(
+                id=f"{order_id}-stop-leg",
+                order_type="OrderType.STOP",
+                stop_price=str(getattr(stop_loss, "stop_price", "")),
+            )
+            rec.legs = [stop_leg]
         self.submitted.append((request, rec))
         return rec
 
@@ -187,6 +205,20 @@ class FakeClient:
             if rec.id == order_id:
                 return rec
         raise KeyError(order_id)
+
+    def close_position(self, symbol):
+        # Atomic cancel-and-close on Alpaca's side. The fake records the
+        # call and returns a synthetic closing order with a fresh id.
+        self.closed_positions.append(symbol)
+        self._order_seq += 1
+        return SimpleNamespace(id=f"close-{self._order_seq}", symbol=symbol)
+
+    def replace_order_by_id(self, order_id, replace_request):
+        # Replace records what was replaced and returns a new order id.
+        self.replaced.append((str(order_id), replace_request))
+        self._order_seq += 1
+        new_id = f"{order_id}-replaced-{self._order_seq}"
+        return SimpleNamespace(id=new_id)
 
 
 def _setup_result():
@@ -237,7 +269,7 @@ def test_gates_reject_on_invalid_sizing():
 # ---------------------------------------------------------------------------
 
 
-def test_entry_bundle_places_all_four_orders():
+def test_entry_bundle_places_entry_and_two_ocos():
     client = FakeClient(equity=100_000, fill_price=100.5)
     setup = _setup_result()  # entry 100, stop 99, tp1 101, tp2 102
     result = place_entry_bundle(setup, equity=100_000, client=client)
@@ -247,18 +279,25 @@ def test_entry_bundle_places_all_four_orders():
     assert result["fill_price"] == 100.5
     assert result["shares"] == 5  # $500 cap / $100 = 5
     assert all(v is not None for v in result["order_ids"].values())
-    # Entry + stop + TP1 + TP2 = 4 orders submitted.
-    assert len(client.submitted) == 4
+    # Entry + OCO1 + OCO2 = 3 submitted requests (each OCO is one submit).
+    assert len(client.submitted) == 3
 
     # Verify each leg's request shape.
     requests = [req for req, _ in client.submitted]
     assert requests[0].__class__.__name__ == "MarketOrderRequest"
-    assert requests[1].__class__.__name__ == "StopOrderRequest"
+    assert requests[1].__class__.__name__ == "LimitOrderRequest"
     assert requests[2].__class__.__name__ == "LimitOrderRequest"
-    assert requests[3].__class__.__name__ == "LimitOrderRequest"
-    # TP1 = 50% of 5 → 2 shares; TP2 = remainder 3.
-    assert requests[2].qty == 2
-    assert requests[3].qty == 3
+    # Both OCOs carry order_class=OCO with a stop_loss leg at the strategy stop.
+    from alpaca.trading.enums import OrderClass
+    assert requests[1].order_class == OrderClass.OCO
+    assert requests[2].order_class == OrderClass.OCO
+    assert float(requests[1].stop_loss.stop_price) == 99.0
+    assert float(requests[2].stop_loss.stop_price) == 99.0
+    # OCO1 takes TP1's half (2 shares @ $101), OCO2 takes TP2's (3 shares @ $102).
+    assert requests[1].qty == 2
+    assert float(requests[1].limit_price) == 101.0
+    assert requests[2].qty == 3
+    assert float(requests[2].limit_price) == 102.0
 
 
 def test_entry_bundle_returns_skip_reason_when_sizing_rejected():
@@ -295,23 +334,28 @@ def test_entry_bundle_handles_single_share_split():
     assert result["tp1_qty"] == 1
     assert result["tp2_qty"] == 0
     assert result["tp2_price"] is None
-    # Entry + stop + TP1 = 3 orders, no TP2.
-    assert len(client.submitted) == 3
+    # Entry + one OCO (TP1's only) = 2 submitted requests.
+    assert len(client.submitted) == 2
+    assert result["order_ids"]["oco_tp2"] is None
+    assert result["order_ids"]["oco_tp2_stop"] is None
 
 
 def test_entry_bundle_partial_failure_marks_incomplete():
-    # Stop submit fails — bundle returns protective_orders_complete=False.
+    # OCO submit fails — bundle returns protective_orders_complete=False.
     class StubFailingClient(FakeClient):
         def submit_order(self, request):
-            if request.__class__.__name__ == "StopOrderRequest":
-                raise RuntimeError("stop order rejected by broker")
+            order_class = getattr(request, "order_class", None)
+            if order_class is not None and str(order_class).lower().endswith("oco"):
+                raise RuntimeError("oco rejected by broker")
             return super().submit_order(request)
 
     client = StubFailingClient(equity=100_000, fill_price=100.5)
     result = place_entry_bundle(_setup_result(), equity=100_000, client=client)
     assert result["placed"] is True
     assert result["protective_orders_complete"] is False
-    assert any(c == "stop" for c, _ in result["errors"])
+    components = {c for c, _ in result["errors"]}
+    assert "oco_tp1" in components
+    assert "oco_tp2" in components
 
 
 def test_entry_bundle_returns_failure_when_market_buy_rejected():
@@ -402,8 +446,8 @@ def test_management_3_55pm_hard_close():
     assert res["action"] == "hard_close_355pm"
     assert res["close_order_id"] is not None
     assert res["error"] is None
-    # All resting orders cancelled before the market sell.
-    assert "stop-NVDA" in client.cancelled
+    # close_position is atomic — server-side cancels related orders and closes.
+    assert "NVDA" in client.closed_positions
 
 
 def test_management_3_55pm_takes_priority_over_other_triggers():
@@ -496,8 +540,13 @@ def test_management_tp1_fill_moves_stop_to_breakeven():
     assert res["success"] is True
     assert res["stop_price"] == 100.0  # avg_entry
     assert res["qty"] == 3
-    # Old stop cancelled, new stop submitted.
-    assert "stop-NVDA" in client.cancelled
+    # Stop replaced in place — OCO link (and TP2 limit) preserved.
+    assert len(client.replaced) == 1
+    replaced_id, replace_req = client.replaced[0]
+    assert replaced_id == "stop-NVDA"
+    assert float(replace_req.stop_price) == 100.0
+    # No cancel_order_by_id — that would have killed the OCO's TP2 leg.
+    assert "stop-NVDA" not in client.cancelled
 
 
 def test_management_tp1_already_at_breakeven_no_action():

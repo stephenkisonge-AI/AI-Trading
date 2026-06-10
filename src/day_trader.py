@@ -2,23 +2,28 @@
 day-trade strategy.
 
 D5a (entries): called by the day-watcher when a setup qualifies AND
-WATCHER_DAY_AUTO_EXECUTE=true. Places a 4-order bundle:
-    1. Market entry (BUY)
+WATCHER_DAY_AUTO_EXECUTE=true. Places:
+    1. Market entry BUY
     2. Wait for fill
-    3. Stop-market SELL (full qty, DAY) at the strategy-defined stop
-    4. TP1 limit SELL (50% qty, DAY) at +1R
-    5. TP2 limit SELL (50% qty, DAY) at +2R
+    3. Two OCO bundles, each covering half the shares:
+        OCO1: tp1_qty shares, stop_loss @ stop  + take_profit @ TP1
+        OCO2: tp2_qty shares, stop_loss @ stop  + take_profit @ TP2
+       When TP1 fills, OCO1's stop auto-cancels; OCO2 keeps protecting
+       the runner. Two OCOs (rather than one stop + two limits) avoid
+       Alpaca's `held_for_orders` reservation conflict that caused TP
+       placements to be rejected with insufficient-qty.
 
 D5b (management): runs at the TOP of every intraday scan before the
 entry pass, so any closes free the position slot. For the (at most)
 one open position, applies in priority order:
-    1. 3:55 PM exit  — close at market, cancel resting orders.
-    2. SPY-VWAP break — close at market if SPY 5-min closed below its
-       session VWAP after our entry filled.
-    3. TP1 fill detected — cancel original stop, place new stop-market
-       at avg_entry_price (breakeven).
+    1. 3:55 PM exit  — close via close_position (atomic cancel+close).
+    2. SPY-VWAP break — close via close_position if SPY 5-min closed
+       below its session VWAP after our entry filled.
+    3. TP1 fill detected — replace OCO2's stop leg to avg_entry_price
+       (breakeven) via replace_order_by_id, preserving the OCO link
+       so TP2's limit stays alive.
     4. Time stop — if (now − fill_time) ≥ 30 min AND current price <
-       entry + 0.25R, close at market.
+       entry + 0.25R, close via close_position.
     (Circuit-breaker halt detection is intentionally deferred — Alpaca
     doesn't expose a clean "halted" status on the position side.)
 
@@ -48,12 +53,13 @@ from datetime import date, datetime, time as _time, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from alpaca.trading.enums import OrderSide, OrderStatus, QueryOrderStatus, TimeInForce
+from alpaca.trading.enums import OrderClass, OrderSide, OrderStatus, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import (
     GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
-    StopOrderRequest,
+    ReplaceOrderRequest,
+    StopLossRequest,
 )
 
 from src.data import get_client
@@ -263,6 +269,20 @@ def check_pre_execution_gates(
     return SkipDecision(True, "")
 
 
+def _extract_stop_leg_id(oco_order) -> str | None:
+    """Return the ID of the stop-loss leg of a returned OCO order, or None
+    if the SDK didn't populate `.legs`. The OCO parent's `.legs` is a list
+    of child orders; one is the take-profit limit, one is the stop-loss
+    stop. We need the stop leg's ID to later replace it with a breakeven
+    stop without breaking the OCO link.
+    """
+    legs = getattr(oco_order, "legs", None) or []
+    for leg in legs:
+        if "stop" in str(getattr(leg, "order_type", "")).lower():
+            return str(leg.id)
+    return None
+
+
 def _wait_for_fill(client, order_id, timeout_sec: int = _FILL_POLL_TIMEOUT_SEC):
     """Poll until the order fills or we time out. Returns the order object
     on fill, raises TimeoutError otherwise.
@@ -280,14 +300,21 @@ def _wait_for_fill(client, order_id, timeout_sec: int = _FILL_POLL_TIMEOUT_SEC):
 
 
 def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
-    """Place market entry + stop-market + TP1 limit + TP2 limit.
+    """Place market entry + two OCO bundles (50/50 scale-out).
+
+    Two OCOs are used (rather than one stop + two TP limits) because
+    Alpaca reserves the full position qty against a stop sell, leaving
+    zero `available` for separate TP limit orders. Each OCO atomically
+    pairs a stop_loss + take_profit for its half of the shares, so the
+    `held_for_orders` total matches position size exactly.
 
     Returns a dict with:
         - placed: bool — entry buy at minimum was submitted
-        - protective_orders_complete: bool — stop + TP1 + TP2 all submitted
+        - protective_orders_complete: bool — entry + OCOs all submitted
         - fill_price: float — actual fill price of the entry
         - shares: int
-        - order_ids: dict with entry/stop/tp1/tp2 IDs (None for any that failed)
+        - order_ids: dict with entry / oco_tp1 / oco_tp1_stop /
+          oco_tp2 / oco_tp2_stop IDs (None for any that failed)
         - errors: list of (component, exception_str) for partial failures
         - skip_reason: str | None — set when sizing rejected
     """
@@ -317,7 +344,9 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
 
     errors: list[tuple[str, str]] = []
     order_ids: dict[str, str | None] = {
-        "entry": None, "stop": None, "tp1": None, "tp2": None,
+        "entry": None,
+        "oco_tp1": None, "oco_tp1_stop": None,
+        "oco_tp2": None, "oco_tp2_stop": None,
     }
 
     # --- 1. Market BUY entry ---
@@ -357,46 +386,40 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
             "order_ids": order_ids,
         }
 
-    # --- 2. Stop-market SELL (full qty) ---
-    try:
-        stop_req = StopOrderRequest(
-            symbol=symbol, qty=shares, side=OrderSide.SELL,
-            time_in_force=TimeInForce.DAY,
-            stop_price=round(setup_result["stop"], 2),
-        )
-        stop_order = client.submit_order(stop_req)
-        order_ids["stop"] = str(stop_order.id)
-    except Exception as exc:
-        errors.append(("stop", str(exc)))
+    stop_px = round(setup_result["stop"], 2)
 
-    # --- 3. TP1 limit SELL (50%) ---
+    # --- 2. OCO bundle covering TP1's half ---
     try:
-        tp1_req = LimitOrderRequest(
+        oco1 = client.submit_order(LimitOrderRequest(
             symbol=symbol, qty=tp1_qty, side=OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
             limit_price=round(setup_result["tp1"], 2),
-        )
-        tp1_order = client.submit_order(tp1_req)
-        order_ids["tp1"] = str(tp1_order.id)
+            order_class=OrderClass.OCO,
+            stop_loss=StopLossRequest(stop_price=stop_px),
+        ))
+        order_ids["oco_tp1"] = str(oco1.id)
+        order_ids["oco_tp1_stop"] = _extract_stop_leg_id(oco1)
     except Exception as exc:
-        errors.append(("tp1", str(exc)))
+        errors.append(("oco_tp1", str(exc)))
 
-    # --- 4. TP2 limit SELL (50%) ---
+    # --- 3. OCO bundle covering TP2's half (skipped for 1-share case) ---
     if tp2_qty > 0:
         try:
-            tp2_req = LimitOrderRequest(
+            oco2 = client.submit_order(LimitOrderRequest(
                 symbol=symbol, qty=tp2_qty, side=OrderSide.SELL,
                 time_in_force=TimeInForce.DAY,
                 limit_price=round(setup_result["tp2"], 2),
-            )
-            tp2_order = client.submit_order(tp2_req)
-            order_ids["tp2"] = str(tp2_order.id)
+                order_class=OrderClass.OCO,
+                stop_loss=StopLossRequest(stop_price=stop_px),
+            ))
+            order_ids["oco_tp2"] = str(oco2.id)
+            order_ids["oco_tp2_stop"] = _extract_stop_leg_id(oco2)
         except Exception as exc:
-            errors.append(("tp2", str(exc)))
+            errors.append(("oco_tp2", str(exc)))
 
-    needed = {"entry", "stop", "tp1"}
+    needed = {"entry", "oco_tp1"}
     if tp2_qty > 0:
-        needed.add("tp2")
+        needed.add("oco_tp2")
     protective_ok = all(order_ids.get(k) is not None for k in needed)
 
     return {
@@ -495,63 +518,45 @@ def _detect_tp1_filled(client, symbol: str, since: datetime) -> bool:
     return False
 
 
-def _cancel_resting_orders(client, symbol: str, now_utc: datetime) -> list[str]:
-    """Cancel all open orders for `symbol`. Returns list of cancelled IDs.
-
-    Best-effort: individual cancel failures don't abort the loop — the
-    caller can still proceed to close the position.
-    """
-    since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
-    orders = _list_orders_since(client, symbol, since)
-    cancelled: list[str] = []
-    for o in orders:
-        is_open = str(getattr(o, "status", "")).lower().split(".")[-1] in (
-            "new", "accepted", "pending_new", "accepted_for_bidding",
-            "held", "partially_filled",
-        )
-        if not is_open:
-            continue
-        try:
-            client.cancel_order_by_id(o.id)
-            cancelled.append(str(o.id))
-        except Exception:
-            # Best-effort. Log nothing — D5b summary captures aggregate.
-            pass
-    return cancelled
-
-
 def _close_position_market(client, symbol: str, position, reason: str,
                            now_utc: datetime) -> dict:
-    """Cancel all open orders for `symbol`, then market-sell the qty.
+    """Atomically cancel related orders and market-close the position.
 
-    Mirrors the crypto pattern. Never raises — failures captured in the
-    returned dict.
+    Uses Alpaca's `close_position` endpoint, which cancels every order
+    tied to the position and submits the closing order in one server-
+    side step. This avoids the race where the previous cancel + submit
+    sequence would hit "insufficient qty available" because the stop's
+    `held_for_orders` reservation hadn't released yet when the close
+    submitted.
+
+    Never raises — failures are captured in the returned dict.
     """
-    cancelled = _cancel_resting_orders(client, symbol, now_utc)
     qty = float(getattr(position, "qty", 0))
     out: dict = {
-        "reason": reason, "cancelled_orders": cancelled,
+        "reason": reason,
+        "cancelled_orders": [],  # close_position handles cancellation server-side
         "close_order_id": None, "qty": qty, "error": None,
     }
     try:
-        order = client.submit_order(MarketOrderRequest(
-            symbol=symbol, qty=qty, side=OrderSide.SELL,
-            time_in_force=TimeInForce.DAY,
-        ))
-        out["close_order_id"] = str(order.id)
+        order = client.close_position(symbol)
+        out["close_order_id"] = str(getattr(order, "id", "") or "")
     except Exception as exc:
-        out["error"] = f"close submit failed: {exc}"
+        out["error"] = f"close_position failed: {exc}"
     return out
 
 
 def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
                             remaining_qty: float) -> dict:
-    """Cancel old stop, place new stop-market at avg_entry_price for the
-    given remaining qty.
+    """Replace the resting OCO stop leg's stop_price with avg_entry_price.
 
-    `remaining_qty` is passed in rather than read from `position.qty`
-    because position.qty reflects pre-TP1-fill quantity in some Alpaca
-    snapshots — caller computes it from the now-known fill events.
+    Uses `replace_order_by_id` rather than cancel+resubmit. After TP1
+    fills, OCO2 still has both a stop leg and a TP2 limit leg linked
+    OCO-style — cancelling the stop would also cancel the TP2 limit
+    and leave the runner without a target. Replacing the stop leg in
+    place preserves the OCO link and keeps TP2 alive.
+
+    `remaining_qty` is recorded for diagnostics; the qty on the leg is
+    already correct (OCO2 was sized to tp2_qty at entry).
     """
     avg_entry = float(getattr(position, "avg_entry_price", 0) or 0)
     if avg_entry <= 0:
@@ -564,23 +569,16 @@ def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
         "qty": remaining_qty, "success": False, "error": None,
     }
     try:
-        client.cancel_order_by_id(old_stop.id)
-    except Exception as exc:
-        out["error"] = f"cancel old stop failed: {exc}"
-        return out
-    try:
-        new_stop = client.submit_order(StopOrderRequest(
-            symbol=symbol, qty=remaining_qty, side=OrderSide.SELL,
-            time_in_force=TimeInForce.DAY,
-            stop_price=stop_px,
-        ))
-        out["new_stop_order_id"] = str(new_stop.id)
+        replaced = client.replace_order_by_id(
+            old_stop.id,
+            ReplaceOrderRequest(stop_price=stop_px),
+        )
+        # Alpaca's replace returns a new Order with a fresh ID; the OCO
+        # link follows the leg automatically.
+        out["new_stop_order_id"] = str(getattr(replaced, "id", "") or old_stop.id)
         out["success"] = True
     except Exception as exc:
-        out["error"] = (
-            f"new stop submit failed: {exc} "
-            f"(OLD STOP CANCELLED — POSITION TEMPORARILY UNPROTECTED)"
-        )
+        out["error"] = f"replace stop failed: {exc}"
     return out
 
 
