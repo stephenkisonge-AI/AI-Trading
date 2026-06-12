@@ -287,17 +287,23 @@ def test_entry_bundle_places_entry_and_two_ocos():
     assert requests[0].__class__.__name__ == "MarketOrderRequest"
     assert requests[1].__class__.__name__ == "LimitOrderRequest"
     assert requests[2].__class__.__name__ == "LimitOrderRequest"
-    # Both OCOs carry order_class=OCO with a stop_loss leg at the strategy stop.
+    # Both OCOs carry order_class=OCO with BOTH take_profit and stop_loss
+    # children populated. Alpaca rejects OCOs that only set parent
+    # limit_price + stop_loss with "oco orders require take_profit.limit_price".
     from alpaca.trading.enums import OrderClass
     assert requests[1].order_class == OrderClass.OCO
     assert requests[2].order_class == OrderClass.OCO
+    assert requests[1].take_profit is not None
+    assert requests[2].take_profit is not None
     assert float(requests[1].stop_loss.stop_price) == 99.0
     assert float(requests[2].stop_loss.stop_price) == 99.0
     # OCO1 takes TP1's half (2 shares @ $101), OCO2 takes TP2's (3 shares @ $102).
     assert requests[1].qty == 2
     assert float(requests[1].limit_price) == 101.0
+    assert float(requests[1].take_profit.limit_price) == 101.0
     assert requests[2].qty == 3
     assert float(requests[2].limit_price) == 102.0
+    assert float(requests[2].take_profit.limit_price) == 102.0
 
 
 def test_entry_bundle_returns_skip_reason_when_sizing_rejected():

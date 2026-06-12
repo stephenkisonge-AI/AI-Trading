@@ -60,6 +60,7 @@ from alpaca.trading.requests import (
     MarketOrderRequest,
     ReplaceOrderRequest,
     StopLossRequest,
+    TakeProfitRequest,
 )
 
 from src.data import get_client
@@ -388,13 +389,20 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
 
     stop_px = round(setup_result["stop"], 2)
 
+    tp1_px = round(setup_result["tp1"], 2)
+    tp2_px = round(setup_result["tp2"], 2)
+
     # --- 2. OCO bundle covering TP1's half ---
+    # Alpaca's OCO requires BOTH take_profit and stop_loss children to be
+    # explicit. The parent's limit_price alone is rejected with
+    # "oco orders require take_profit.limit_price" (error 40010001).
     try:
         oco1 = client.submit_order(LimitOrderRequest(
             symbol=symbol, qty=tp1_qty, side=OrderSide.SELL,
             time_in_force=TimeInForce.DAY,
-            limit_price=round(setup_result["tp1"], 2),
+            limit_price=tp1_px,
             order_class=OrderClass.OCO,
+            take_profit=TakeProfitRequest(limit_price=tp1_px),
             stop_loss=StopLossRequest(stop_price=stop_px),
         ))
         order_ids["oco_tp1"] = str(oco1.id)
@@ -408,8 +416,9 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
             oco2 = client.submit_order(LimitOrderRequest(
                 symbol=symbol, qty=tp2_qty, side=OrderSide.SELL,
                 time_in_force=TimeInForce.DAY,
-                limit_price=round(setup_result["tp2"], 2),
+                limit_price=tp2_px,
                 order_class=OrderClass.OCO,
+                take_profit=TakeProfitRequest(limit_price=tp2_px),
                 stop_loss=StopLossRequest(stop_price=stop_px),
             ))
             order_ids["oco_tp2"] = str(oco2.id)
