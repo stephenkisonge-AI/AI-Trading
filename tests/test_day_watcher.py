@@ -82,8 +82,18 @@ def test_phase_intraday_scan_at_1554():
     assert determine_phase(_et(date(2026, 5, 27), time(15, 54))) is PHASE_INTRADAY_SCAN
 
 
-def test_phase_outside_at_1556():
-    assert determine_phase(_et(date(2026, 5, 27), time(15, 56))) is PHASE_OUTSIDE
+def test_phase_intraday_scan_at_1555_so_hard_close_can_fire():
+    # The 15:55 ET tick MUST land inside the intraday window so
+    # manage_open_positions runs the 3:55 PM hard close. The previous
+    # boundary at 15:55 (exclusive) made the hard-close branch unreachable.
+    assert determine_phase(_et(date(2026, 5, 27), time(15, 55))) is PHASE_INTRADAY_SCAN
+    assert determine_phase(_et(date(2026, 5, 27), time(15, 59))) is PHASE_INTRADAY_SCAN
+
+
+def test_phase_outside_at_market_close():
+    # 16:00 ET = market close. No further management actions are useful.
+    assert determine_phase(_et(date(2026, 5, 27), time(16, 0))) is PHASE_OUTSIDE
+    assert determine_phase(_et(date(2026, 5, 27), time(16, 1))) is PHASE_OUTSIDE
 
 
 def test_phase_outside_at_3am():
@@ -93,7 +103,8 @@ def test_phase_outside_at_3am():
 def test_end_of_session_window_includes_1550_excludes_1555():
     """End-of-session summary only fires inside [15:50, 15:55) ET — the
     single 5-min tick before the 15:55 hard close. Earlier intraday
-    ticks log to stdout only; 15:55 itself is PHASE_OUTSIDE.
+    ticks log to stdout only; 15:55 itself is still intraday but runs
+    management (hard close) instead of resending the EOS summary.
     """
     from src.day_watcher import _END_OF_SESSION_START, _END_OF_SESSION_END
     # The cron fires on 5-min boundaries. 15:50 is inside; 15:55 is the

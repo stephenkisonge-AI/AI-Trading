@@ -66,7 +66,12 @@ ET = ZoneInfo("America/New_York")
 _PRE_SESSION_START = time(9, 25)
 _PRE_SESSION_END = time(9, 30)
 _INTRADAY_SCAN_START = time(9, 45)
-_INTRADAY_SCAN_END = time(15, 55)
+# Ends at market close (16:00 ET). The 15:55 ET tick MUST land inside the
+# intraday window so manage_open_positions can fire the 3:55 PM hard close
+# (src/day_trader.py:_HARD_CLOSE_TIME_ET). Setup detectors gate themselves
+# to their own earlier time windows, so no new entries are placed in the
+# 15:55-16:00 range — only management actions execute.
+_INTRADAY_SCAN_END = time(16, 0)
 
 # End-of-session summary window — single 5-min tick. The 15:50 ET cron
 # firing sends one daily wrap-up alert (skip patterns + lifecycle stats).
