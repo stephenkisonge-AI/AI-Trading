@@ -59,24 +59,35 @@ def test_auto_execute_enabled_when_both_flags_set(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_sizing_capped_at_500_when_calculated_higher():
+def test_sizing_capped_at_30k_when_calculated_higher():
     # equity 100k, 0.5% risk = $500. Entry 100, stop 99 → stop_dist 1%.
-    # Required notional = 500 / 0.01 = $50,000 → capped to $500.
+    # Required notional = 500 / 0.01 = $50,000 → capped to $30,000.
+    # Realized risk at the cap = $30,000 × 1% = $300 (under the $500 allowance).
     out = compute_position_size(equity=100_000, entry=100.0, stop=99.0)
-    assert out["shares"] == 5
-    assert out["notional"] == 500.0
+    assert out["shares"] == 300
+    assert out["notional"] == 30_000.0
 
 
 def test_sizing_uses_risk_dollars_when_below_cap():
-    # equity 5000 → risk = $25. Entry 100, stop 95 → 5% stop_dist.
-    # Required notional = 25 / 0.05 = $500 → exactly cap.
+    # equity 5000 → risk = $25. Entry 100, stop 99 → 1% stop_dist.
+    # Required notional = 25 / 0.01 = $2,500 → well under $30K cap, so
+    # risk-dollars binds and shares = floor(2500/100) = 25.
     out = compute_position_size(equity=5_000, entry=100.0, stop=99.0)
-    # entry 100, stop 99 → stop_dist 1%, risk = $25, needed = $2500, cap = $500 → 5 shares.
-    assert out["shares"] == 5
-    # Re-test with wider stop where notional < cap.
+    assert out["shares"] == 25
+    # Wider stop, smaller account — risk binds first too.
     out2 = compute_position_size(equity=2_000, entry=100.0, stop=97.0)
-    # risk = $10, stop_dist 3%, needed = $10 / 0.03 = $333.33, cap = $500, accept.
+    # risk = $10, stop_dist 3%, needed = $10 / 0.03 = $333.33, well under cap → 3 shares.
     assert out2["shares"] == 3
+
+
+def test_sizing_risk_binds_at_wide_stops_on_full_account():
+    # At wider stops, risk-dollars binds before the cap. equity 100k,
+    # entry 100, stop 97.5 (2.5% stop) → risk $500, needed $20,000,
+    # cap $30,000 → risk-dollars binds, 200 shares, $20k notional.
+    out = compute_position_size(equity=100_000, entry=100.0, stop=97.5)
+    assert out["shares"] == 200
+    assert out["notional"] == 20_000.0
+    assert out["risk_dollars"] == 500.0
 
 
 def test_sizing_rejects_stop_too_tight():
@@ -102,11 +113,12 @@ def test_sizing_rejects_when_under_50_floor():
 
 
 def test_sizing_rejects_fractional_under_one_share():
-    # High-priced share on $500 cap: needs entry > $500 to floor to 0
-    # shares, but stop_dist must still be in [0.3%, 3%] to avoid the
-    # earlier gates. Entry $600, stop $594 → 1% stop_dist, notional
-    # capped at $500 → floor(500/600) = 0 shares.
-    out = compute_position_size(equity=100_000, entry=600.0, stop=594.0)
+    # Engineering a fractional result needs notional_capped < entry. With
+    # the $30K cap that rarely happens for realistic tickers — instead we
+    # construct it from the small-equity side: equity $100, entry $100,
+    # stop $99. Risk = $0.50, stop_dist 1%, needed = $50, capped at $50
+    # (above the $50 floor, just). Shares = floor(50/100) = 0 → fractional.
+    out = compute_position_size(equity=100, entry=100.0, stop=99.0)
     assert out["shares"] == 0
     assert "fractional_under_one_share" in out["skip_reason"]
 
@@ -277,7 +289,9 @@ def test_entry_bundle_places_entry_and_two_ocos():
     assert result["placed"] is True
     assert result["protective_orders_complete"] is True
     assert result["fill_price"] == 100.5
-    assert result["shares"] == 5  # $500 cap / $100 = 5
+    # $30K notional cap binds (needed $50K for 0.5% risk at 1% stop).
+    # 300 shares × $100 = $30K notional. Realized risk = $300.
+    assert result["shares"] == 300
     assert all(v is not None for v in result["order_ids"].values())
     # Entry + OCO1 + OCO2 = 3 submitted requests (each OCO is one submit).
     assert len(client.submitted) == 3
@@ -297,11 +311,11 @@ def test_entry_bundle_places_entry_and_two_ocos():
     assert requests[2].take_profit is not None
     assert float(requests[1].stop_loss.stop_price) == 99.0
     assert float(requests[2].stop_loss.stop_price) == 99.0
-    # OCO1 takes TP1's half (2 shares @ $101), OCO2 takes TP2's (3 shares @ $102).
-    assert requests[1].qty == 2
+    # OCO1 takes TP1's half (150 shares @ $101), OCO2 takes TP2's (150 shares @ $102).
+    assert requests[1].qty == 150
     assert float(requests[1].limit_price) == 101.0
     assert float(requests[1].take_profit.limit_price) == 101.0
-    assert requests[2].qty == 3
+    assert requests[2].qty == 150
     assert float(requests[2].limit_price) == 102.0
     assert float(requests[2].take_profit.limit_price) == 102.0
 
@@ -317,24 +331,18 @@ def test_entry_bundle_returns_skip_reason_when_sizing_rejected():
 
 
 def test_entry_bundle_handles_single_share_split():
-    # equity 1000 → risk $5. stop_dist 1% → needed $500 → 5 shares.
-    # But push to make shares == 1: entry 400, stop 399 → 0.25% < min 0.3%.
-    # Try entry 100, stop 96 → 4% > max 3%, rejected.
-    # Try entry 100, stop 99 (1%), equity 100 → risk $0.5, needed $50, capped at $50,
-    # shares = 0 → "fractional_under_one_share". Won't work.
-    # Try equity 10_000, entry 600, stop 590 (1.67% dist) → risk $50, needed $3000,
-    # cap $500, shares = 0 → fractional. Still no.
-    # Direct test: equity that gives exactly 1 share. risk=0.5%*equity, cap $500,
-    # entry P → shares = floor($500/P). For 1 share, $500/P ∈ [1,2) → P ∈ (250, 500].
-    # Try entry 400, stop 396 (1% dist), equity 1_000_000 → risk $5000, needed $500000,
-    # cap $500 → 1 share, tp1 splits to 1, tp2 to 0. TP2 should be skipped.
-    client = FakeClient(equity=1_000_000, fill_price=400.5)
+    # Engineer shares == 1 to exercise the "1 share, no TP2" branch.
+    # Need notional_capped in [entry, 2 * entry). Use small equity so the
+    # risk-dollars side binds well below the $30K cap:
+    # equity 200, entry 100, stop 99 (1% stop) → risk $1, needed $100,
+    # capped at $100 (above the $50 floor). shares = floor(100/100) = 1.
+    client = FakeClient(equity=200, fill_price=100.5)
     setup = {
-        "setup": "A", "symbol": "GOOGL", "qualified": True, "conditions": [],
-        "entry": 400.0, "stop": 396.0, "atr": 2.0,
-        "tp1": 404.0, "tp2": 408.0,
+        "setup": "A", "symbol": "ARM", "qualified": True, "conditions": [],
+        "entry": 100.0, "stop": 99.0, "atr": 0.5,
+        "tp1": 101.0, "tp2": 102.0,
     }
-    result = place_entry_bundle(setup, equity=1_000_000, client=client)
+    result = place_entry_bundle(setup, equity=200, client=client)
     assert result["placed"] is True
     assert result["shares"] == 1
     assert result["tp1_qty"] == 1

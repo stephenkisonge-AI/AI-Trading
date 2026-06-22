@@ -67,7 +67,14 @@ from src.data import get_client
 
 
 # --- Tunables (keep in sync with Day_Trading_Strategy.md) ----------------
-_MAX_NOTIONAL_USD = 500.0
+# Notional cap is a safety belt that only binds when the stop is so tight
+# that the risk-percent allowance would deploy an unreasonably large
+# position. At $30,000 cap with 1% stops, max risk per trade is $300
+# (well under the 0.5% × equity allowance for a $100K+ account). The cap
+# was previously $500, calibrated to a much smaller account size — that
+# value silently throttled every trade to ~1 share at typical prices,
+# making the $500/week target structurally unreachable.
+_MAX_NOTIONAL_USD = 30_000.0
 _MIN_NOTIONAL_USD = 50.0
 _MIN_STOP_DIST_PCT = 0.003  # 0.3% — tighter = normal noise stops us out
 _MAX_STOP_DIST_PCT = 0.03   # 3%   — wider = 2R unreachable intraday
@@ -127,9 +134,11 @@ def day_auto_execute_enabled() -> bool:
 
 
 def compute_position_size(equity: float, entry: float, stop: float) -> dict:
-    """R-based sizing capped at $500 notional. Returns a dict with `shares`
-    (int) and either a `skip_reason` (str) when sizing is rejected or
-    `notional` + `risk_dollars` when accepted.
+    """R-based sizing: deploy notional such that loss-at-stop = 0.5% of
+    equity, capped by `_MAX_NOTIONAL_USD` for tight-stop safety.
+
+    Returns a dict with `shares` (int) and either a `skip_reason` (str)
+    when sizing is rejected or `notional` + `risk_dollars` when accepted.
     """
     if entry <= 0 or stop <= 0 or stop >= entry:
         return {"shares": 0, "skip_reason": "invalid_entry_or_stop"}

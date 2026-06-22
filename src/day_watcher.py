@@ -514,10 +514,14 @@ def run_intraday_scan(now_et: datetime) -> dict:
                                     if exec_result.get("tp2_price") is not None
                                     else "n/a"
                                 )
+                                notional = exec_result['fill_price'] * exec_result['shares']
+                                risk_per_share = exec_result['fill_price'] - exec_result['stop_price']
+                                risk_total = risk_per_share * exec_result['shares']
                                 send_alert(
                                     f"✅ AUTO-EXEC FILLED — {sym} Setup "
                                     f"{setup_result['setup']} @ ${exec_result['fill_price']:.2f} "
-                                    f"× {exec_result['shares']} sh. "
+                                    f"× {exec_result['shares']} sh "
+                                    f"(${notional:,.0f} notional, ${risk_total:,.0f} risk). "
                                     f"Stop ${exec_result['stop_price']:.2f}, "
                                     f"TP1 ${exec_result['tp1_price']:.2f}, "
                                     f"TP2 {tp2_str}"
