@@ -20,8 +20,8 @@ Thumbs.db
 .idea/
 *.swp
 
-# Claude Code runtime
-.claude/scheduled_tasks.lock
+# Claude Code runtime — local config + lock files, never share
+.claude/
 
 # Watcher build
 .pytest_cache/
