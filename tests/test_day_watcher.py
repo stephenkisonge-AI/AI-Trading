@@ -234,7 +234,8 @@ def test_eligibility_stale_calendar_blocks_everything():
     )
     assert eligible == []
     assert all(reason == "stale_calendar" for _, reason in blocked)
-    assert len(blocked) == 7
+    from src.universe import UNIVERSE
+    assert len(blocked) == len(UNIVERSE)
 
 
 def test_eligibility_econ_event_today_surfaced():
@@ -248,4 +249,5 @@ def test_eligibility_econ_event_today_surfaced():
     assert econ == "CPI"
     # Econ event surfaces the warning but doesn't block eligibility —
     # the per-scan path applies the 30-min blackout.
-    assert len(eligible) == 7
+    from src.universe import UNIVERSE
+    assert len(eligible) == len(UNIVERSE)

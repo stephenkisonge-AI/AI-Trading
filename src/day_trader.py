@@ -112,7 +112,7 @@ _CLIENT_ORDER_ID_PREFIX = "DAY"
 _OVERRIDE_EXPECTANCY_ENV_VAR = "WATCHER_DAY_OVERRIDE_EXPECTANCY"
 # -------------------------------------------------------------------------
 
-UNIVERSE = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"]
+from src.universe import UNIVERSE  # single source of truth — edit src/universe.py
 ET = ZoneInfo("America/New_York")
 
 

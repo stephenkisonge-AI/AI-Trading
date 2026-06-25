@@ -37,7 +37,12 @@ ROOT = Path(__file__).resolve().parents[1]
 EARNINGS_PATH = ROOT / "state" / "earnings.json"
 ECON_EVENTS_PATH = ROOT / "state" / "econ_events.json"
 
-UNIVERSE_STOCKS = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT"]
+# Stocks subject to earnings refresh — sourced from the consolidated
+# universe in src/universe.py with ETFs filtered out.
+import sys as _sys
+_sys.path.insert(0, str(ROOT))
+from src.universe import STOCKS_WITH_EARNINGS as _STOCKS_WITH_EARNINGS
+UNIVERSE_STOCKS = sorted(_STOCKS_WITH_EARNINGS)
 
 _FINNHUB_BASE = "https://finnhub.io/api/v1"
 _FINNHUB_TIMEOUT_SEC = 15

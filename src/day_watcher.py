@@ -52,9 +52,9 @@ from src.day_trader import (
 from src.indicators import atr, ema
 from src.notifier import send_alert
 
-# Universe — locked in Day_Trading_Strategy.md.
-UNIVERSE = ["NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"]
-STOCKS = {"NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT"}  # GLD exempt from earnings filter
+# Universe — single source of truth in src/universe.py. STOCKS is the
+# subset subject to the earnings-blackout filter (ETFs exempt).
+from src.universe import UNIVERSE, STOCKS_WITH_EARNINGS as STOCKS
 
 ET = ZoneInfo("America/New_York")
 
