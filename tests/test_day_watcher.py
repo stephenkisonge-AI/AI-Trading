@@ -186,7 +186,10 @@ def test_eligibility_all_eligible_when_clean():
         earnings_payload=_fresh_earnings(),
         econ_payload=_fresh_econ(),
     )
-    assert set(eligible) == {"NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT", "GLD"}
+    # Clean calendar → the entire universe is eligible. Derived from the
+    # single source of truth so universe changes don't restale this test.
+    from src.universe import UNIVERSE
+    assert set(eligible) == set(UNIVERSE)
     assert blocked == []
     assert econ is None
 

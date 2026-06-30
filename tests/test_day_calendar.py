@@ -27,8 +27,10 @@ UTC = timezone.utc
 def test_load_earnings_against_seed_file():
     payload = load_earnings()
     assert isinstance(payload, EarningsPayload)
-    # Universe is six stocks; ETFs (GLD) are intentionally absent.
-    assert set(payload.earnings) == {"NVDA", "TSLA", "AAPL", "AMZN", "GOOGL", "MSFT"}
+    # The seed carries every earnings-bearing stock and no ETFs. Derived
+    # from the single source of truth so universe changes don't restale it.
+    from src.universe import STOCKS_WITH_EARNINGS
+    assert set(payload.earnings) == STOCKS_WITH_EARNINGS
     for symbol, dates in payload.earnings.items():
         assert all(isinstance(d, date) for d in dates), f"{symbol} has non-date entries"
 

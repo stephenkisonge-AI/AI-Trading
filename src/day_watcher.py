@@ -171,8 +171,11 @@ def _resolve_eligibility(
     eligible: list[str] = []
     blocked: list[tuple[str, str]] = []
 
-    # Stale-calendar fail-closed: blocks the whole session.
-    if is_stale(earnings_payload) or is_stale(econ_payload):
+    # Stale-calendar fail-closed: blocks the whole session. Staleness is
+    # measured relative to the scan's own clock (now_et), not wall-clock —
+    # identical in production (now_et is derived from now), but keeps the
+    # check deterministic for tests and correct for any historical replay.
+    if is_stale(earnings_payload, now=now_et) or is_stale(econ_payload, now=now_et):
         return [], [(s, "stale_calendar") for s in UNIVERSE], None
 
     # Econ blackout flag (informational here; the actual time-window
