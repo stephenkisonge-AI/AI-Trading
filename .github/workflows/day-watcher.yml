@@ -40,13 +40,14 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Send Telegram test ping
+      - name: Send test ping (Telegram + heartbeat)
         if: github.event.inputs.test_ping == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
         run: |
-          python -c "import sys; from src.notifier import send_alert; sys.exit(0 if send_alert('🧪 day-watcher → Telegram pipeline test (workflow_dispatch test_ping=true).') else 1)"
+          python -c "import sys; from src.notifier import send_alert; from src.heartbeat import ping_heartbeat; tg = send_alert('🧪 day-watcher → Telegram pipeline test (workflow_dispatch test_ping=true).'); hb = ping_heartbeat(); print(f'telegram_ok={tg} heartbeat_ok={hb}'); sys.exit(0 if (tg and hb) else 1)"
 
       - name: Run day watcher
         if: github.event.inputs.test_ping != 'true'
