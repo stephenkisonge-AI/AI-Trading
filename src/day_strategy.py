@@ -72,6 +72,13 @@ _SETUP_B_BAR_RVOL_MIN = 1.0
 # Stop-distance cap applies to both setups — ≤ this × 5-min ATR(14).
 _STOP_ATR_CAP = 1.5
 
+# Stop-distance FLOOR (both setups) as a % of entry. Stops tighter than this
+# are normal-noise stop-outs and the execution gate rejects them at sizing
+# (day_trader._MIN_STOP_DIST_PCT → "stop_too_tight_under_0.3pct"). The
+# qualifier screens them out too so it never emits a QUALIFIED alert for a
+# setup that can't actually execute. MUST stay in sync with that gate value.
+_MIN_STOP_DIST_PCT = 0.003  # 0.3%
+
 # Setup B condition 8 — buffer below the VWAP touch low expressed as
 # ATR multiples. Strategy doc: "plus a 0.25× ATR buffer".
 _SETUP_B_STOP_BUFFER_ATR = 0.25
@@ -387,13 +394,15 @@ def evaluate_setup_a(
         and stop_dist > 0
         and atr_val is not None
         and stop_dist <= _STOP_ATR_CAP * atr_val
+        and stop_dist >= _MIN_STOP_DIST_PCT * last_close
         and not no_chase_violated
     )
     conditions.append(_check(
         "stop_at_or_midpoint_within_atr_cap",
         cond8,
         f"stop={stop} stop_dist={stop_dist} atr14={atr_val} "
-        f"cap={_STOP_ATR_CAP}xATR no_chase_violation={no_chase_violated}",
+        f"cap={_STOP_ATR_CAP}xATR floor={_MIN_STOP_DIST_PCT:.1%} "
+        f"no_chase_violation={no_chase_violated}",
     ))
 
     # C9 — No earnings today/yesterday (skipped for ETFs by caller).
@@ -546,13 +555,15 @@ def evaluate_setup_b(
         and stop_dist > 0
         and atr_val is not None
         and stop_dist <= _STOP_ATR_CAP * atr_val
+        and stop_dist >= _MIN_STOP_DIST_PCT * last_close
         and not no_chase_violated
     )
     conditions.append(_check(
         "stop_below_vwap_touch_within_atr_cap",
         cond8,
         f"stop={stop} stop_dist={stop_dist} atr14={atr_val} "
-        f"cap={_STOP_ATR_CAP}xATR no_chase_violation={no_chase_violated}",
+        f"cap={_STOP_ATR_CAP}xATR floor={_MIN_STOP_DIST_PCT:.1%} "
+        f"no_chase_violation={no_chase_violated}",
     ))
 
     # C9 — No earnings + no gap.

@@ -482,3 +482,62 @@ def test_pick_winner_returns_none_when_neither_qualifies():
     a = {"setup": "A", "qualified": False}
     b = {"setup": "B", "qualified": False}
     assert pick_winner(a, b) is None
+
+
+# ---------------------------------------------------------------------------
+# Stop-distance FLOOR (0.3%) — qualifier must not emit setups the execution
+# gate will reject as "stop_too_tight_under_0.3pct". Reproduces the live
+# NFLX (-0.21%) / AAPL (-0.14%) QUALIFIED→SKIP pairs.
+# ---------------------------------------------------------------------------
+
+
+def _setup_b_with_stop(touch_low: float, atr: float = 0.4) -> pd.DataFrame:
+    """Setup-B candidate (entry=100) where every condition passes EXCEPT the
+    stop distance, which is governed by `touch_low`:
+        stop = touch_low - 0.25*atr ;  stop_dist = 100 - stop.
+    Lower touch_low → wider stop. Lets us straddle the 0.3% floor (=0.30 at
+    entry 100) while holding the rest of the geometry fixed.
+    """
+    vwap_at_touch = touch_low + 0.05  # low <= vwap → registers as a touch
+    return _5min_bars(
+        date(2026, 5, 27), [0, 5, 10, 15],
+        opens=[100.5, 100.4, 100.0, 99.6],
+        highs=[101.0, 100.5, 100.05, 100.1],   # bar-0 high=101 → prior high
+        lows=[100.2, 100.0, touch_low, 99.8],
+        closes=[100.4, 100.1, 99.9, 100.0],    # last bar green, > vwap
+        volumes=[100, 100, 100, 300],
+        vwaps=[100.0, 99.95, vwap_at_touch, 99.9],
+        ema9s=[100.0, 100.0, 99.95, 100.1],
+        ema20s=[99.7, 99.7, 99.7, 99.8],
+        atrs=[atr, atr, atr, atr],
+        bar_rvols=[1.0, 1.0, 1.0, 1.5],
+    )
+
+
+def _eval_b(cand):
+    return evaluate_setup_b(
+        symbol="AAPL",
+        now_et=_et_dt(date(2026, 5, 27), time(10, 0)),
+        spy_daily_df=_bullish_spy_daily(),
+        spy_5min_df=_bullish_spy_5min_strict(date(2026, 5, 27)),
+        cand_5min_df=cand,
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=0.005,
+    )
+
+
+def test_setup_b_rejects_stop_tighter_than_floor():
+    # touch_low=99.85 → stop=99.75 → stop_dist=0.25 = 0.25% < 0.3% floor.
+    result = _eval_b(_setup_b_with_stop(touch_low=99.85))
+    failed = {c["name"] for c in result["conditions"] if not c["passed"]}
+    assert not result["qualified"], f"should reject tight stop; failed={failed}"
+    # The stop condition must be the (only) reason — the floor is what bites.
+    assert failed == {"stop_below_vwap_touch_within_atr_cap"}, failed
+
+
+def test_setup_b_accepts_stop_just_above_floor():
+    # touch_low=99.70 → stop=99.60 → stop_dist=0.40 = 0.40% > 0.3% floor.
+    result = _eval_b(_setup_b_with_stop(touch_low=99.70))
+    failed = {c["name"] for c in result["conditions"] if not c["passed"]}
+    assert result["qualified"], f"adequate stop should still qualify; failed={failed}"
