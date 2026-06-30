@@ -49,6 +49,7 @@ from src.day_trader import (
     place_entry_bundle,
     summarize_day_lifecycle,
 )
+from src.heartbeat import ping_heartbeat
 from src.indicators import atr, ema
 from src.notifier import send_alert
 
@@ -588,7 +589,15 @@ def main() -> int:
         tb = traceback.format_exc()
         print(f"[day-watcher] FAILED: {exc}\n{tb}", file=sys.stderr)
         send_alert(f"⚠️ day-watcher crash in phase {phase.name}: {exc}")
+        # Flip the dead-man's switch to "down" now rather than waiting for
+        # the silence window — a crash is a real failure the watchdog should
+        # surface immediately.
+        ping_heartbeat(fail=True)
         return 1
+    # Scan completed cleanly — tell the external watchdog we're alive. Pings
+    # only fire on actionable phases, matching the healthcheck's market-hours
+    # cron so off-hours silence never trips a false alarm.
+    ping_heartbeat()
     return 0
 
 

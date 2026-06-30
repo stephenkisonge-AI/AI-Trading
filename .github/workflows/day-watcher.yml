@@ -62,4 +62,9 @@ jobs:
           # Hard-refused unless ALPACA_PAPER_TRADE=True — see
           # src/day_trader.py:day_auto_execute_enabled().
           WATCHER_DAY_AUTO_EXECUTE: ${{ secrets.WATCHER_DAY_AUTO_EXECUTE }}
+          # Self-heal heartbeat — healthchecks.io ping URL. On each clean
+          # scan the watcher pings this; if scans stop (runner/billing
+          # outage, crash) healthchecks.io alerts you directly. Unset = the
+          # heartbeat silently no-ops. See src/heartbeat.py.
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
         run: python -m src.day_watcher
