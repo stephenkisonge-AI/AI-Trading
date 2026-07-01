@@ -263,6 +263,21 @@ def check_pre_execution_gates(
     if expectancy_skip is not None:
         return expectancy_skip
 
+    # One-position rule — asked of the broker at execution time, not scan
+    # time, so a fill earlier in the same scan can't slip a second entry
+    # through. Scoped to the day universe: crypto swing holdings in the
+    # shared paper account neither block nor are blocked by day trades.
+    try:
+        positions = client.get_all_positions()
+    except Exception as exc:
+        return SkipDecision(False, f"could_not_fetch_positions: {exc}")
+    open_day_positions = [
+        p for p in positions if getattr(p, "symbol", None) in UNIVERSE
+    ]
+    if open_day_positions:
+        held = getattr(open_day_positions[0], "symbol", "?")
+        return SkipDecision(False, f"position_already_open_{held}")
+
     # Session-cap check.
     try:
         n_today = _count_today_entries(client)
@@ -300,10 +315,14 @@ def _wait_for_fill(client, order_id, timeout_sec: int = _FILL_POLL_TIMEOUT_SEC):
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         order = client.get_order_by_id(order_id)
-        status = getattr(order, "status", None)
-        if str(status).lower().endswith("filled"):
+        # Normalize both enum reprs ("OrderStatus.FILLED") and plain strings
+        # ("filled") to the bare status word. Exact match matters:
+        # "partially_filled" must NOT count as filled — sizing the OCOs off
+        # a partial fill would leave sell qty exceeding the position.
+        status = str(getattr(order, "status", "")).lower().split(".")[-1]
+        if status == "filled":
             return order
-        if str(status).lower() in ("rejected", "canceled", "expired"):
+        if status in ("rejected", "canceled", "cancelled", "expired"):
             raise RuntimeError(f"entry order ended in status {status}")
         time.sleep(_FILL_POLL_INTERVAL_SEC)
     raise TimeoutError(f"order {order_id} not filled within {timeout_sec}s")
@@ -731,6 +750,11 @@ def manage_open_positions(
 
     actions: list[dict] = []
     for pos in positions:
+        # The crypto swing strand shares this paper account. Its positions
+        # (BTCUSD etc.) must never be touched by day-trade management —
+        # the 3:55 PM hard close would liquidate a multi-day swing hold.
+        if getattr(pos, "symbol", None) not in UNIVERSE:
+            continue
         try:
             res = manage_position(
                 client=client, position=pos, now_et=now_et,

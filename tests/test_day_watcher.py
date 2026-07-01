@@ -15,6 +15,9 @@ from src.day_watcher import (
     PHASE_OPENING_OBSERVE,
     PHASE_OUTSIDE,
     PHASE_PRE_SESSION,
+    _drop_in_progress_bars,
+    _drop_today_daily,
+    _is_first_blackout_tick,
     _overnight_gap_pct,
     _resolve_eligibility,
     determine_phase,
@@ -172,6 +175,119 @@ def test_overnight_gap_zero_when_yesterday_close_is_zero():
     yesterday = _daily([0.0])
     today = _5min_today([100.0])
     assert _overnight_gap_pct(yesterday, today) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Closed-bar helpers — _drop_in_progress_bars / _drop_today_daily
+# ---------------------------------------------------------------------------
+
+
+def test_drop_in_progress_bars_removes_partial_bucket():
+    # Bars start 13:30, 13:35, 13:40 UTC. At 13:42 the 13:40 bucket is
+    # still forming (closes 13:45) — only the first two bars are closed.
+    df = _5min_today([100.0, 101.0, 102.0])
+    now = datetime(2026, 5, 27, 13, 42, tzinfo=_UTC)
+    out = _drop_in_progress_bars(df, now)
+    assert len(out) == 2
+    assert out["close"].iloc[-1] == 101.0
+
+
+def test_drop_in_progress_bars_keeps_bar_exactly_at_close():
+    # At 13:45:00 the 13:40 bucket has fully elapsed — keep all three.
+    df = _5min_today([100.0, 101.0, 102.0])
+    now = datetime(2026, 5, 27, 13, 45, tzinfo=_UTC)
+    out = _drop_in_progress_bars(df, now)
+    assert len(out) == 3
+
+
+def test_drop_in_progress_bars_empty_df_passthrough():
+    empty = pd.DataFrame(
+        columns=["open", "high", "low", "close", "volume"],
+        index=pd.DatetimeIndex([], tz="UTC"),
+    )
+    now = datetime(2026, 5, 27, 13, 45, tzinfo=_UTC)
+    assert len(_drop_in_progress_bars(empty, now)) == 0
+
+
+def test_drop_today_daily_removes_todays_partial_bar():
+    # Daily pull ending "today" includes the in-progress session bar on
+    # the IEX feed — it must be dropped so iloc[-1] is yesterday's close.
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-05-26 04:00", tz="America/New_York"),
+        pd.Timestamp("2026-05-27 04:00", tz="America/New_York"),  # today
+    ])
+    df = pd.DataFrame({"close": [100.0, 105.0]}, index=idx)
+    now_et = _et(date(2026, 5, 27), time(10, 0))
+    out = _drop_today_daily(df, now_et)
+    assert len(out) == 1
+    assert out["close"].iloc[-1] == 100.0
+
+
+def test_drop_today_daily_no_op_when_no_today_bar():
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-05-22 04:00", tz="America/New_York"),
+        pd.Timestamp("2026-05-26 04:00", tz="America/New_York"),
+    ])
+    df = pd.DataFrame({"close": [99.0, 100.0]}, index=idx)
+    now_et = _et(date(2026, 5, 27), time(10, 0))
+    out = _drop_today_daily(df, now_et)
+    assert len(out) == 2
+
+
+def test_gap_filter_end_to_end_with_todays_partial_daily_bar():
+    # Regression for the real production shape: the daily pull's last bar
+    # is TODAY's partial bar. Unfiltered, the gap computes vs today's own
+    # price (≈0) and the 4% disqualifier never trips. Filtered, the true
+    # 5% gap is visible.
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-05-26 04:00", tz="America/New_York"),
+        pd.Timestamp("2026-05-27 04:00", tz="America/New_York"),
+    ])
+    daily = pd.DataFrame({"close": [100.0, 105.2]}, index=idx)
+    today = _5min_today([105.0])
+    now_et = _et(date(2026, 5, 27), time(10, 0))
+    filtered = _drop_today_daily(daily, now_et)
+    assert _overnight_gap_pct(filtered, today) == pytest.approx(0.05)
+
+
+# ---------------------------------------------------------------------------
+# _is_first_blackout_tick
+# ---------------------------------------------------------------------------
+
+
+def _cpi_payload():
+    # CPI at 08:30 ET → blackout halo [08:00, 09:00] ET.
+    return _fresh_econ([("CPI", datetime(2026, 5, 27, 12, 30, tzinfo=_UTC))])
+
+
+def test_first_blackout_tick_true_at_window_open():
+    payload = _cpi_payload()
+    # Window opens 12:00 UTC; ticks at 12:00-12:04:59 are "first".
+    now = datetime(2026, 5, 27, 12, 2, tzinfo=_UTC)
+    assert _is_first_blackout_tick(now, "CPI", payload) is True
+
+
+def test_first_blackout_tick_false_later_in_window():
+    payload = _cpi_payload()
+    now = datetime(2026, 5, 27, 12, 20, tzinfo=_UTC)
+    assert _is_first_blackout_tick(now, "CPI", payload) is False
+
+
+def test_first_blackout_tick_false_before_window():
+    payload = _cpi_payload()
+    now = datetime(2026, 5, 27, 11, 58, tzinfo=_UTC)
+    assert _is_first_blackout_tick(now, "CPI", payload) is False
+
+
+def test_first_blackout_tick_ignores_other_events():
+    payload = _fresh_econ([
+        ("CPI", datetime(2026, 5, 27, 12, 30, tzinfo=_UTC)),
+        ("NFP", datetime(2026, 5, 27, 12, 30, tzinfo=_UTC)),
+    ])
+    now = datetime(2026, 5, 27, 12, 2, tzinfo=_UTC)
+    # Matching name required — the helper keys off the event that
+    # is_econ_blackout reported.
+    assert _is_first_blackout_tick(now, "GDP", payload) is False
 
 
 # ---------------------------------------------------------------------------

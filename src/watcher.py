@@ -32,7 +32,9 @@ from src.trader import (
     summarize_lifecycle,
 )
 
-SYMBOLS = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
+# Universe — single source of truth in src/universe.py (shared with the
+# trader so both strands agree on which positions are "ours").
+from src.universe import CRYPTO_SYMBOLS as SYMBOLS
 
 # Cron schedule: every 4 hours at :17 UTC (see .github/workflows/watcher.yml).
 # Keep these in sync with the cron — they drive the "next scan" line in the

@@ -22,6 +22,7 @@ import pandas as pd
 
 from src.data import _assert_paper_mode, get_client
 from src.day_calendar import (
+    ECON_BLACKOUT_MINUTES,
     is_earnings_blackout,
     is_econ_blackout,
     is_stale,
@@ -80,6 +81,9 @@ _INTRADAY_SCAN_END = time(16, 0)
 _END_OF_SESSION_START = time(15, 50)
 _END_OF_SESSION_END = time(15, 55)
 
+# Scan cadence — drives the "first tick in blackout window" dedup below.
+_SCAN_INTERVAL_MINUTES = 5
+
 
 @dataclass(frozen=True)
 class Phase:
@@ -131,6 +135,42 @@ def _add_5min_indicators(
     return out
 
 
+def _drop_in_progress_bars(
+    df: pd.DataFrame,
+    now_utc: datetime,
+    bar_minutes: int = 5,
+) -> pd.DataFrame:
+    """Keep only CLOSED bars. Alpaca stamps bars with their bucket START
+    and the aggregate endpoint includes the partial in-progress bucket,
+    so a bar is closed only once `start + bar_minutes <= now`.
+
+    The strategy doc is explicit that setups evaluate on closed candles —
+    without this, a mid-bar spike above ORH could trigger an entry on a
+    candle that later closes back below the level.
+    """
+    if len(df) == 0:
+        return df
+    cutoff = now_utc - timedelta(minutes=bar_minutes)
+    return df[df.index <= cutoff]
+
+
+def _drop_today_daily(daily_df: pd.DataFrame, now_et: datetime) -> pd.DataFrame:
+    """Drop today's (in-progress) daily bar from a 1Day pull.
+
+    The IEX feed returns a partial daily bar for the current session, so
+    `iloc[-1]` of an unfiltered pull is today's LIVE price — which breaks
+    both the overnight-gap math (gap vs "yesterday's close" that is
+    actually today's price ≈ 0) and the closed-candle regime doctrine.
+    """
+    if len(daily_df) == 0:
+        return daily_df
+    if not isinstance(daily_df.index, pd.DatetimeIndex) or daily_df.index.tz is None:
+        return daily_df
+    today = now_et.astimezone(ET).date()
+    keep = [d < today for d in daily_df.index.tz_convert(ET).date]
+    return daily_df[keep]
+
+
 def _overnight_gap_pct(
     yesterday_daily_df: pd.DataFrame,
     today_5min_df: pd.DataFrame,
@@ -147,6 +187,28 @@ def _overnight_gap_pct(
     if yc == 0:
         return 0.0
     return (to - yc) / yc
+
+
+def _is_first_blackout_tick(
+    now: datetime,
+    econ_name: str,
+    econ_payload,
+    window_minutes: int = ECON_BLACKOUT_MINUTES,
+) -> bool:
+    """True when `now` falls in the FIRST scan tick of the named event's
+    blackout halo. The halo spans ±window_minutes around the release and
+    covers ~12 five-minute ticks — Telegram gets one alert (this tick),
+    the rest log to stdout only.
+    """
+    now_utc = now.astimezone(timezone.utc)
+    for name, event_ts in econ_payload.events:
+        if name != econ_name:
+            continue
+        window_start = event_ts - timedelta(minutes=window_minutes)
+        into_window = now_utc - window_start
+        if timedelta(0) <= into_window < timedelta(minutes=_SCAN_INTERVAL_MINUTES):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +270,12 @@ def run_pre_session(now_et: datetime) -> dict:
     )
 
     # SPY daily regime — 260 calendar days back gives ≥200 trading days.
-    spy_daily = get_stock_bars(
+    # Closed candles only: today's partial daily bar is dropped.
+    spy_daily = _drop_today_daily(get_stock_bars(
         "SPY", "1Day",
         start=now_et - timedelta(days=400),
         end=now_et,
-    )
+    ), now_et)
     regime = classify_regime(spy_daily)
 
     # Account snapshot for the alert body.
@@ -342,36 +405,49 @@ def run_intraday_scan(now_et: datetime) -> dict:
         econ_payload=econ_payload,
     )
 
-    # Hard stop if econ blackout window is active right now.
+    # Hard stop if econ blackout window is active right now. The halo spans
+    # ~12 ticks; only the first one alerts Telegram — the rest would be
+    # identical noise (same policy as the removed per-tick no-setups alert).
     in_econ_blackout, econ_name = is_econ_blackout(now_et, econ_payload)
     if in_econ_blackout:
-        send_alert(
+        msg = (
             f"⏸ Day-trade scan @ {now_et.astimezone(ET).strftime('%H:%M ET')} "
             f"— SKIPPED, in econ blackout window ({econ_name})."
         )
+        if _is_first_blackout_tick(now_et, econ_name, econ_payload):
+            send_alert(msg)
+        else:
+            print(f"[day-watcher] {msg}")
         return {"phase": "intraday_scan", "skipped": "econ_blackout", "event": econ_name}
 
     if not eligible:
         # Stale calendar already blocks everything.
         return {"phase": "intraday_scan", "skipped": "no_eligible_universe"}
 
-    # SPY pulls — once per scan.
-    spy_daily = get_stock_bars(
+    # SPY pulls — once per scan. Setup evaluation sees CLOSED candles only:
+    # today's partial daily bar and the in-progress 5-min bucket are dropped.
+    now_utc = now_et.astimezone(timezone.utc)
+    spy_daily = _drop_today_daily(get_stock_bars(
         "SPY", "1Day",
         start=now_et - timedelta(days=400),
         end=now_et,
-    )
+    ), now_et)
     today_start_utc = now_et.astimezone(ET).replace(
         hour=9, minute=30, second=0, microsecond=0
     ).astimezone(timezone.utc)
-    spy_5min_today = get_stock_bars(
+    spy_5min_today_raw = get_stock_bars(
         "SPY", "5Min", start=today_start_utc, end=now_et,
     )
+    spy_5min_today = _drop_in_progress_bars(spy_5min_today_raw, now_utc)
     spy_5min_hist = get_stock_bars(
         "SPY", "5Min",
         start=now_et - timedelta(days=30), end=today_start_utc,
     )
     spy_5min_with_ind = _add_5min_indicators(spy_5min_today, spy_5min_hist)
+    # Management pass gets the RAW pull — manage_position drops the final
+    # (possibly in-progress) bar itself; pre-dropping here would delay
+    # SPY-VWAP-break detection by one extra tick.
+    spy_5min_mgmt = _add_5min_indicators(spy_5min_today_raw, spy_5min_hist)
 
     # Position lookup — one slot enforced strategy-wide; we ask the
     # broker rather than relying on internal state, matching crypto.
@@ -387,7 +463,7 @@ def run_intraday_scan(now_et: datetime) -> dict:
     if day_auto_execute_enabled():
         mgmt_actions = manage_open_positions(
             now_et=now_et,
-            spy_5min_with_indicators=spy_5min_with_ind,
+            spy_5min_with_indicators=spy_5min_mgmt,
             client=client,
         )
         for act in mgmt_actions:
@@ -419,9 +495,13 @@ def run_intraday_scan(now_et: datetime) -> dict:
                 )
 
     # Re-fetch positions after management — closes may have freed the slot.
+    # Scoped to the day universe: crypto swing holdings share this paper
+    # account and must not permanently block the day strand.
     try:
         positions = client.get_all_positions()
-        has_any_position = len(positions) > 0
+        has_any_position = any(
+            getattr(p, "symbol", None) in UNIVERSE for p in positions
+        )
     except Exception as exc:
         send_alert(f"⚠️ day-watcher could not fetch positions: {exc}")
         return {"phase": "intraday_scan", "error": "positions_fetch_failed"}
@@ -441,17 +521,17 @@ def run_intraday_scan(now_et: datetime) -> dict:
 
     for sym in eligible:
         try:
-            cand_today = get_stock_bars(
+            cand_today = _drop_in_progress_bars(get_stock_bars(
                 sym, "5Min", start=today_start_utc, end=now_et,
-            )
+            ), now_utc)
             cand_hist = get_stock_bars(
                 sym, "5Min",
                 start=now_et - timedelta(days=30), end=today_start_utc,
             )
-            cand_daily = get_stock_bars(
+            cand_daily = _drop_today_daily(get_stock_bars(
                 sym, "1Day",
                 start=now_et - timedelta(days=5), end=now_et,
-            )
+            ), now_et)
             in_earnings = (
                 sym in STOCKS
                 and is_earnings_blackout(sym, today_et, earnings_payload)
@@ -499,6 +579,12 @@ def run_intraday_scan(now_et: datetime) -> dict:
                                 equity=equity,
                                 client=client,
                             )
+                            if exec_result.get("placed", False):
+                                # Slot taken — later symbols in THIS scan
+                                # must see the position (the broker-side
+                                # gate backstops this, but the evaluators'
+                                # C10 check reads this flag).
+                                has_any_position = True
                             if not exec_result.get("placed", False):
                                 send_alert(
                                     f"⚠️ AUTO-EXEC FAILED — {sym} entry rejected: "

@@ -39,3 +39,11 @@ UNIVERSE: list[str] = [
 # Symbols subject to the earnings-blackout filter. ETFs have no earnings.
 ETFS: set[str] = {"QQQ", "SPY", "GLD"}
 STOCKS_WITH_EARNINGS: set[str] = {s for s in UNIVERSE if s not in ETFS}
+
+# Crypto swing universe (src/watcher.py + src/trader.py). Kept here so the
+# two strands can tell their positions apart — they share one Alpaca paper
+# account, and each strand must only count/manage its own symbols.
+CRYPTO_SYMBOLS: list[str] = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
+
+# Alpaca returns crypto position/order symbols without the slash (BTCUSD).
+CRYPTO_SYMBOLS_NO_SLASH: set[str] = {s.replace("/", "") for s in CRYPTO_SYMBOLS}

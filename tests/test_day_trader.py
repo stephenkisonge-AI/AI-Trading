@@ -10,11 +10,14 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
+import src.day_trader as day_trader
 from src.day_trader import (
     SkipDecision,
+    _wait_for_fill,
     check_pre_execution_gates,
     compute_position_size,
     day_auto_execute_enabled,
+    manage_open_positions,
     manage_position,
     place_entry_bundle,
 )
@@ -141,10 +144,12 @@ class FakeClient:
     """In-memory TradingClient stub. Records orders submitted and returns
     a configurable account / orders list."""
 
-    def __init__(self, equity=100_000, last_equity=100_000, orders=(), fill_price=None):
+    def __init__(self, equity=100_000, last_equity=100_000, orders=(),
+                 fill_price=None, positions=()):
         self.equity = equity
         self.last_equity = last_equity
         self._orders = list(orders)
+        self._positions = list(positions)
         self.submitted: list = []
         self.fill_price = fill_price
         self._order_seq = 0
@@ -158,6 +163,9 @@ class FakeClient:
         return SimpleNamespace(
             equity=str(self.equity), last_equity=str(self.last_equity)
         )
+
+    def get_all_positions(self):
+        return list(self._positions)
 
     def get_orders(self, filter=None):
         return list(self._orders)
@@ -274,6 +282,58 @@ def test_gates_reject_on_invalid_sizing():
     decision = check_pre_execution_gates(client, bad_setup, equity=100_000)
     assert decision.allowed is False
     assert "stop_too_tight" in decision.reason
+
+
+def test_gates_reject_when_day_position_already_open():
+    # One-position rule is enforced against LIVE broker state — a fill
+    # earlier in the same scan must block a second entry.
+    client = FakeClient(positions=[SimpleNamespace(symbol="TSLA")])
+    decision = check_pre_execution_gates(client, _setup_result(), equity=100_000)
+    assert decision.allowed is False
+    assert "position_already_open_TSLA" in decision.reason
+
+
+def test_gates_ignore_crypto_positions_from_swing_strand():
+    # The crypto swing strand shares the paper account — a BTC swing hold
+    # must NOT block day-trade entries.
+    client = FakeClient(positions=[SimpleNamespace(symbol="BTCUSD")])
+    decision = check_pre_execution_gates(client, _setup_result(), equity=100_000)
+    assert decision.allowed is True
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_fill status parsing
+# ---------------------------------------------------------------------------
+
+
+class _FixedStatusClient:
+    def __init__(self, status):
+        self._status = status
+
+    def get_order_by_id(self, order_id):
+        return SimpleNamespace(status=self._status)
+
+
+def test_wait_for_fill_partial_fill_is_not_filled(monkeypatch):
+    # PARTIALLY_FILLED must not satisfy the fill wait — sizing the OCOs
+    # off a partial fill would leave sell qty exceeding the position.
+    monkeypatch.setattr(day_trader, "_FILL_POLL_INTERVAL_SEC", 0.01)
+    client = _FixedStatusClient("OrderStatus.PARTIALLY_FILLED")
+    with pytest.raises(TimeoutError):
+        _wait_for_fill(client, "ord-1", timeout_sec=0.05)
+
+
+def test_wait_for_fill_rejected_raises_immediately():
+    client = _FixedStatusClient("OrderStatus.REJECTED")
+    with pytest.raises(RuntimeError, match="rejected"):
+        _wait_for_fill(client, "ord-1", timeout_sec=5)
+
+
+def test_wait_for_fill_accepts_enum_and_plain_filled():
+    for status in ("OrderStatus.FILLED", "filled"):
+        client = _FixedStatusClient(status)
+        order = _wait_for_fill(client, "ord-1", timeout_sec=1)
+        assert order is not None
 
 
 # ---------------------------------------------------------------------------
@@ -656,6 +716,36 @@ def test_management_no_entry_fill_bails_safely():
         spy_5min_with_indicators=None,
     )
     assert res is None
+
+
+def test_manage_open_positions_never_touches_crypto_positions():
+    # The crypto swing strand shares this paper account. Its positions must
+    # be invisible to day-trade management — the 3:55 PM hard close would
+    # otherwise liquidate a multi-day BTC swing hold.
+    client = MgmtFakeClient(
+        orders=[],
+        positions=[_open_position(symbol="BTCUSD")],
+    )
+    now = _et_dt(date(2026, 5, 28), time(15, 56))  # inside hard-close window
+    actions = manage_open_positions(
+        now_et=now, spy_5min_with_indicators=None, client=client,
+    )
+    assert actions == []
+    assert client.closed_positions == []
+
+
+def test_manage_open_positions_still_hard_closes_universe_position():
+    client = MgmtFakeClient(
+        orders=[_filled_buy_order(), _open_stop_order()],
+        positions=[_open_position(symbol="NVDA")],
+    )
+    now = _et_dt(date(2026, 5, 28), time(15, 56))
+    actions = manage_open_positions(
+        now_et=now, spy_5min_with_indicators=None, client=client,
+    )
+    assert len(actions) == 1
+    assert actions[0]["action"] == "hard_close_355pm"
+    assert client.closed_positions == ["NVDA"]
 
 
 # ---------------------------------------------------------------------------

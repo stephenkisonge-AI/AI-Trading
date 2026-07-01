@@ -54,6 +54,7 @@ import pandas as pd
 from src.data import get_bars, get_client, get_latest_quote
 from src.indicators import add_indicators
 from src.strategy import classify_regime
+from src.universe import CRYPTO_SYMBOLS_NO_SLASH
 
 
 # --- Tunables (keep in sync with Crypto Strategy.md) ---------------------
@@ -218,6 +219,11 @@ def _gate_daily_entry_cap(client) -> Optional[SkipDecision]:
         after=today_start,
     ))
     for o in recent:
+        # The day-trade strand shares this paper account — its equity BUYs
+        # must not consume the crypto strand's 1-entry/day budget.
+        sym = str(getattr(o, "symbol", "") or "").replace("/", "")
+        if sym not in CRYPTO_SYMBOLS_NO_SLASH:
+            continue
         if not _side_is(o, "buy"):
             continue
         fq = getattr(o, "filled_qty", None)
@@ -735,6 +741,10 @@ def manage_open_positions() -> list[dict]:
 
     for position in positions:
         symbol_no_slash = getattr(position, "symbol", "")
+        # Equity positions belong to the day-trade strand (same account) —
+        # regime exits / time stops / breakeven moves must not touch them.
+        if symbol_no_slash.replace("/", "") not in CRYPTO_SYMBOLS_NO_SLASH:
+            continue
         symbol = _slashed(symbol_no_slash)
         try:
             # Priority 1 — regime exit (always applies)
