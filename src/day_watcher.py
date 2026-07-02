@@ -48,6 +48,7 @@ from src.day_strategy import (
 from src.day_trader import (
     check_pre_execution_gates,
     day_auto_execute_enabled,
+    day_shorts_enabled,
     manage_open_positions,
     place_entry_bundle,
     summarize_day_lifecycle,
@@ -676,6 +677,10 @@ def main() -> int:
     now_et = datetime.now(timezone.utc).astimezone(ET)
     phase = determine_phase(now_et)
     print(f"[day-watcher] phase={phase.name} now_et={now_et.isoformat()}")
+    # Kill-switch states, logged every run — first place to look when a
+    # qualified setup didn't execute.
+    print(f"[day-watcher] flags: auto_execute={day_auto_execute_enabled()} "
+          f"shorts_enabled={day_shorts_enabled()}")
 
     if not phase.is_actionable:
         return 0
