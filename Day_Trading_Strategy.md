@@ -49,11 +49,22 @@ if paper performance is strong, I will sit with results for at least
   - 2:00 – 3:00 PM: Setup B only (secondary window).
   - 3:00 – 3:55 PM: manage only. NO new entries.
   - 3:55 – 4:00 PM: all positions flat.
-- **Max notional per trade: $500.**
+- **Max notional per trade: $30,000.** (Raised from the original $500 —
+  that value was calibrated to a much smaller account and silently
+  throttled every trade to ~1 share; at $30K the 0.5%-risk sizing rule
+  is what actually binds.)
 - **Max 3 trades per session.** Also keeps us within the PDT rule
   ceiling of 3 day-trades per 5 trading days if I ever migrate to a
   live margin account < $25K.
-- **No leverage. No options. No shorts.** Long-only spot equities.
+- **No leverage. No options.** Shorts ARE allowed — but only via the
+  two short setups defined below (mirror images of A and B), only in a
+  BEARISH daily regime, and only when `WATCHER_DAY_ENABLE_SHORTS=true`
+  is set in GitHub Secrets (fail-closed, same philosophy as the
+  auto-execute switch; short setups still ALERT when the switch is off).
+  Rationale: the original long-only rule made the strategy fully idle in
+  any bearish tape — trading breakdowns with the downtrend is the
+  standard professional mirror of trading breakouts with the uptrend,
+  and every risk cap applies identically.
 - **No trade on earnings day or the day after** for any stock in the
   universe. (ETFs are exempt — GLD has no earnings.)
 - **No trade within 30 minutes of a scheduled FOMC announcement, CPI,
@@ -88,8 +99,10 @@ dropped. If I want accumulation later, it gets its own document.)
 
 ## Asset universe — flat
 
-Seven names. No tiers — the 10-condition setup gate plus the 3-trade
-session cap throttle frequency on their own.
+The canonical list lives in `src/universe.py` (currently 21 liquid
+mega-caps, sector leaders, and broad ETFs — expanded from the original
+seven below). No tiers — the 10-condition setup gate plus the 3-trade
+session cap throttle frequency on their own. The original seven:
 
 | Symbol | Class | Notes |
 |---|---|---|
@@ -171,10 +184,12 @@ Run this check at the 9:25 ET pre-scan. It governs the whole session.
 - **Improving:** SPY daily close > 200 SMA BUT 50 SMA < 200 SMA.
   Setup A only.
 - **Choppy:** SPY oscillating within ±5% of 200 SMA over the last 20
-  daily candles, no clear direction. **No trades** — long-only day
-  trading in chop is a losing proposition.
-- **Bearish:** SPY < 200 SMA. **No trades.** (Long-only with no good
-  edge in a bearish regime.)
+  daily candles, no clear direction. **No trades** — day trading chop
+  is a losing proposition in either direction.
+- **Bearish:** SPY < 200 SMA. **Short setups armed** (A-Short and
+  B-Short below). No longs. Short execution additionally requires
+  `WATCHER_DAY_ENABLE_SHORTS=true`; otherwise bearish days are
+  alerts-only.
 
 **Overnight gap check** (per ticker):
 - If a universe ticker has gapped > 4% overnight (yesterday's regular-
@@ -189,12 +204,14 @@ The daily regime sets the bias; the intraday character determines
 *when* a setup is valid.
 
 - **Bullish session:** SPY above session VWAP AND above its 5-min
-  EMA 9. Both setups armed.
+  EMA 9. Both long setups armed.
 - **Mixed session:** SPY whipping across VWAP (last 5-min close on
-  opposite side of VWAP from prior 5-min close). Setup A only, and
-  only with bar-RVOL > 1.5× on the candidate's breakout candle.
+  opposite side of VWAP from prior 5-min close). Setup A (or A-Short
+  in a bearish regime) only, and only with bar-RVOL > 1.5× on the
+  candidate's trigger candle.
 - **Bearish session:** SPY below VWAP AND below 5-min EMA 9. No new
-  entries. Manage open position if any.
+  LONG entries — in a bearish daily regime this is exactly when the
+  short setups are armed. Manage open position if any.
 
 ---
 
@@ -240,9 +257,49 @@ Long entry triggers only when ALL of these are true:
 9. No earnings today or yesterday for the candidate. (Skipped for GLD.)
 10. No open position anywhere (correlation cap).
 
-**No chasing rule (both setups):** If the trigger has already moved
+---
+
+## Entry Setup A-Short — Opening Range Breakdown (bearish regime only)
+
+Exact mirror of Setup A. Short entry triggers only when ALL are true:
+
+1. Daily regime is **bearish**; SPY intraday session is bearish (or
+   mixed with the elevated-RVOL condition).
+2. Within the **9:45 – 10:30 AM ET** window.
+3. Opening range identified.
+4. A 5-minute candle **closes below the ORL** (no wicks-only).
+5. **Bar-RVOL on the breakdown candle ≥ 1.5×**.
+6. Price is **below session VWAP** at the moment of breakdown.
+7. The 5-min EMA 9 is below the EMA 20.
+8. Stop at the **midpoint of the opening range** (above entry), stop
+   distance ≤ 1.5× ATR(14) and ≥ 0.3% of entry.
+9. No earnings today or yesterday. (ETFs exempt.)
+10. No open position anywhere.
+
+TP1 at −1R (cover 50%, stop → breakeven), TP2 at −2R (cover the rest).
+
+## Entry Setup B-Short — VWAP Rejection Continuation (bearish regime only)
+
+Exact mirror of Setup B. Short entry triggers only when ALL are true:
+
+1. Daily regime is **bearish**; SPY intraday session is bearish.
+2. Within a Setup B window (9:45–11:30 AM or 2:00–3:00 PM ET).
+3. The candidate had a session rally that touched or poked above
+   session VWAP from below.
+4. The most recent **closed 5-min candle is red** AND closes back
+   **below session VWAP**.
+5. The 5-min EMA 9 is below the EMA 20 (intraday downtrend intact).
+6. **Bar-RVOL on the rejection candle ≥ 1.0×**.
+7. A clear prior intraday LOW below current price provides ≥ 2R.
+8. Stop just above the VWAP touch high, plus a 0.25× ATR buffer.
+   Stop distance ≤ 1.5× ATR(14) and ≥ 0.3% of entry.
+9. No earnings today or yesterday. (ETFs exempt.)
+10. No open position anywhere.
+
+**No chasing rule (all setups):** If the trigger has already moved
 more than 1.5× ATR past the entry trigger price without coming back,
-skip. The setup is gone.
+skip. The setup is gone. (For shorts: fallen more than 1.5× ATR below
+the trigger.)
 
 **Setup A wins ties:** If both setups fire on the same name within
 the 9:45–10:30 overlap window in the same scan, take Setup A. (Its
@@ -317,15 +374,21 @@ must be working hard or it's not earning its keep intraday.
 - **Daily loss limit:** **−1.5%** of account equity (realized).
   Hit → stop trading for the session. Tighter than swing's −2% because
   day trades close faster and a bad session can compound.
-- **Weekly loss limit:** **−4%** of account equity. Hit → stop until
-  the following Monday.
+- **Weekly loss limit:** **−4%** of account equity, measured from
+  week-start equity via Alpaca portfolio history. Hit → stop until the
+  window rolls. (Implemented as a pre-execution gate.)
 - **Consecutive loss cooldown (session level):** After 2 losing trades
   in the same session, stop for the day. After 3 losing sessions in a
-  row, pause for 5 trading days.
+  row, pause ~5 trading days (implemented statelessly as 7 calendar
+  days from the last losing session).
 - **No-trade conditions** — skip any trade if any are true:
-  - Daily regime is choppy or bearish.
+  - Daily regime is choppy — or bearish for LONGS / non-bearish for
+    SHORTS (each direction trades only its own regime).
   - Overnight gap > 4% on the candidate.
-  - Bid/ask spread > 0.05% on the candidate.
+  - Bid/ask spread > 0.10% on the candidate (IEX top-of-book; the
+    original 0.05% was calibrated to consolidated NBBO, which the free
+    feed doesn't carry). Quote-fetch failures fail OPEN — IEX quote
+    gaps are a data quirk, not a trade veto.
   - Earnings today or yesterday (stocks only).
   - Within 30 minutes of FOMC / CPI / PCE / NFP / GDP release per
     `state/econ_events.json`.

@@ -40,7 +40,9 @@ from src.day_strategy import (
     classify_intraday_character,
     classify_regime,
     evaluate_setup_a,
+    evaluate_setup_a_short,
     evaluate_setup_b,
+    evaluate_setup_b_short,
     pick_winner,
 )
 from src.day_trader import (
@@ -350,46 +352,50 @@ def _scan_candidate(
             "session_rvol": float(s_rvol.iloc[-1]),
         }
 
-    setup_a = evaluate_setup_a(
+    common = dict(
         symbol=symbol, now_et=now_et,
         spy_daily_df=spy_daily_df, spy_5min_df=spy_5min_with_indicators,
         cand_5min_df=cand_5min, has_position=has_position,
         in_earnings_blackout=in_earnings_blackout,
         overnight_gap_pct=gap_pct,
     )
-    setup_b = evaluate_setup_b(
-        symbol=symbol, now_et=now_et,
-        spy_daily_df=spy_daily_df, spy_5min_df=spy_5min_with_indicators,
-        cand_5min_df=cand_5min, has_position=has_position,
-        in_earnings_blackout=in_earnings_blackout,
-        overnight_gap_pct=gap_pct,
-    )
-    winner = pick_winner(setup_a, setup_b)
+    setup_a = evaluate_setup_a(**common)
+    setup_b = evaluate_setup_b(**common)
+    # Short-side mirrors — armed only in a BEARISH regime (their C1), so
+    # at most one direction can qualify on any given day. Alerts fire for
+    # qualifying shorts even when execution is disabled by the
+    # WATCHER_DAY_ENABLE_SHORTS kill switch (the gate handles that).
+    setup_a_short = evaluate_setup_a_short(**common)
+    setup_b_short = evaluate_setup_b_short(**common)
 
+    long_winner = pick_winner(setup_a, setup_b)
+    short_winner = pick_winner(setup_a_short, setup_b_short)
+    winner = long_winner if long_winner is not None else short_winner
+
+    all_setups = {
+        "A": setup_a, "B": setup_b,
+        "AS": setup_a_short, "BS": setup_b_short,
+    }
     if winner is None:
-        # Pick the closer-to-qualifying setup as the primary skip reason.
-        a_pass = sum(1 for c in setup_a["conditions"] if c["passed"])
-        b_pass = sum(1 for c in setup_b["conditions"] if c["passed"])
-        if a_pass >= b_pass:
-            failed = [c["name"] for c in setup_a["conditions"] if not c["passed"]]
-            return {
-                "symbol": symbol,
-                "qualified_setup": None,
-                "skip_reason": f"A:{','.join(failed[:2])}",
-                "setup_a": setup_a, "setup_b": setup_b,
-            }
-        failed = [c["name"] for c in setup_b["conditions"] if not c["passed"]]
+        # Pick the closest-to-qualifying setup as the primary skip reason.
+        label, best = max(
+            all_setups.items(),
+            key=lambda kv: sum(1 for c in kv[1]["conditions"] if c["passed"]),
+        )
+        failed = [c["name"] for c in best["conditions"] if not c["passed"]]
         return {
             "symbol": symbol,
             "qualified_setup": None,
-            "skip_reason": f"B:{','.join(failed[:2])}",
+            "skip_reason": f"{label}:{','.join(failed[:2])}",
             "setup_a": setup_a, "setup_b": setup_b,
+            "setup_a_short": setup_a_short, "setup_b_short": setup_b_short,
         }
     return {
         "symbol": symbol,
         "qualified_setup": winner,
         "skip_reason": None,
         "setup_a": setup_a, "setup_b": setup_b,
+        "setup_a_short": setup_a_short, "setup_b_short": setup_b_short,
     }
 
 
@@ -568,9 +574,11 @@ def run_intraday_scan(now_et: datetime) -> dict:
                             client, setup_result, equity=equity,
                             lifecycle_stats=lifecycle,
                         )
+                        direction_label = setup_result.get("direction", "long").upper()
                         if not gate.allowed:
                             send_alert(
-                                f"⏭ AUTO-EXEC SKIP — {sym} Setup {setup_result['setup']}: "
+                                f"⏭ AUTO-EXEC SKIP — {sym} Setup "
+                                f"{setup_result['setup']} {direction_label}: "
                                 f"{gate.reason}"
                             )
                         else:
@@ -605,11 +613,14 @@ def run_intraday_scan(now_et: datetime) -> dict:
                                     else "n/a"
                                 )
                                 notional = exec_result['fill_price'] * exec_result['shares']
-                                risk_per_share = exec_result['fill_price'] - exec_result['stop_price']
+                                risk_per_share = abs(
+                                    exec_result['fill_price'] - exec_result['stop_price']
+                                )
                                 risk_total = risk_per_share * exec_result['shares']
                                 send_alert(
                                     f"✅ AUTO-EXEC FILLED — {sym} Setup "
-                                    f"{setup_result['setup']} @ ${exec_result['fill_price']:.2f} "
+                                    f"{setup_result['setup']} {direction_label} "
+                                    f"@ ${exec_result['fill_price']:.2f} "
                                     f"× {exec_result['shares']} sh "
                                     f"(${notional:,.0f} notional, ${risk_total:,.0f} risk). "
                                     f"Stop ${exec_result['stop_price']:.2f}, "

@@ -56,6 +56,7 @@ from zoneinfo import ZoneInfo
 from alpaca.trading.enums import OrderClass, OrderSide, OrderStatus, QueryOrderStatus, TimeInForce
 from alpaca.trading.requests import (
     GetOrdersRequest,
+    GetPortfolioHistoryRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     ReplaceOrderRequest,
@@ -81,6 +82,21 @@ _MAX_STOP_DIST_PCT = 0.03   # 3%   — wider = 2R unreachable intraday
 _RISK_PER_TRADE_PCT = 0.005  # 0.5% of equity (half of swing)
 _MAX_TRADES_PER_SESSION = 3
 _DAILY_LOSS_CAP_PCT = 0.015  # -1.5% from prior session equity
+# Weekly loss cap — Day_Trading_Strategy.md §"Risk caps": −4% from
+# week-start equity stops trading until the following Monday. Measured
+# from Alpaca portfolio history (1W window), so it includes the crypto
+# strand's P&L too — account-level risk brake, deliberately strict.
+_WEEKLY_LOSS_CAP_PCT = 0.04
+# Consecutive-loss cooldowns — doc §"Risk caps": 2 losing trades in one
+# session stops the session; 3 losing sessions in a row pauses ~5
+# trading days (approximated as 7 calendar days, stateless).
+_SESSION_LOSS_STOP_COUNT = 2
+_LOSING_SESSION_STREAK = 3
+_LOSING_STREAK_PAUSE_CAL_DAYS = 7
+# Spread gate — doc lists 0.05% consolidated NBBO; IEX top-of-book
+# (the free feed) prints wider than NBBO, so 0.10% is the IEX-adjusted
+# equivalent. Quote failures fail OPEN (IEX quote gaps are data quirks).
+_SPREAD_CAP_PCT = 0.001
 _FILL_POLL_TIMEOUT_SEC = 30
 _FILL_POLL_INTERVAL_SEC = 1
 
@@ -93,6 +109,15 @@ _TIME_STOP_R_FRACTION = 0.25
 # Order-history lookback when reconstructing position state from Alpaca
 # (find fill_time, find original stop). 1 day is enough for intraday.
 _ORDER_HISTORY_LOOKBACK_DAYS = 1
+# After cancelling resting orders pre-close, wait up to this long for the
+# `held_for_orders` reservation to release before calling close_position.
+_CANCEL_RELEASE_TIMEOUT_SEC = 15
+_CANCEL_RELEASE_POLL_SEC = 0.5
+# Statuses that mean an order still holds (or may hold) share reservations.
+_OPEN_ORDER_STATUSES = (
+    "new", "accepted", "pending_new", "accepted_for_bidding",
+    "held", "partially_filled",
+)
 
 # --- D5c lifecycle tunables ----------------------------------------------
 # Per Day_Trading_Strategy.md §"Phase D5c". 90 days mirrors crypto.
@@ -133,16 +158,33 @@ def day_auto_execute_enabled() -> bool:
     return True
 
 
-def compute_position_size(equity: float, entry: float, stop: float) -> dict:
+def day_shorts_enabled() -> bool:
+    """Short-side kill switch — fail-closed like the auto-execute flag.
+    Short setups ALERT regardless; execution requires the literal string
+    "true" in WATCHER_DAY_ENABLE_SHORTS (GitHub Secret).
+    """
+    return os.environ.get("WATCHER_DAY_ENABLE_SHORTS", "").lower() == "true"
+
+
+def compute_position_size(
+    equity: float, entry: float, stop: float, direction: str = "long",
+) -> dict:
     """R-based sizing: deploy notional such that loss-at-stop = 0.5% of
     equity, capped by `_MAX_NOTIONAL_USD` for tight-stop safety.
+
+    For longs the stop must be below entry; for shorts, above. All caps
+    and floors apply identically to both directions.
 
     Returns a dict with `shares` (int) and either a `skip_reason` (str)
     when sizing is rejected or `notional` + `risk_dollars` when accepted.
     """
-    if entry <= 0 or stop <= 0 or stop >= entry:
+    if entry <= 0 or stop <= 0:
         return {"shares": 0, "skip_reason": "invalid_entry_or_stop"}
-    stop_dist_pct = (entry - stop) / entry
+    if direction == "long" and stop >= entry:
+        return {"shares": 0, "skip_reason": "invalid_entry_or_stop"}
+    if direction == "short" and stop <= entry:
+        return {"shares": 0, "skip_reason": "invalid_entry_or_stop"}
+    stop_dist_pct = abs(entry - stop) / entry
     if stop_dist_pct < _MIN_STOP_DIST_PCT:
         return {"shares": 0, "skip_reason": "stop_too_tight_under_0.3pct"}
     if stop_dist_pct > _MAX_STOP_DIST_PCT:
@@ -167,18 +209,30 @@ def compute_position_size(equity: float, entry: float, stop: float) -> dict:
 
 
 def _count_today_entries(client) -> int:
-    """Count today's filled BUY orders for universe symbols."""
+    """Count today's filled ENTRY orders for universe symbols.
+
+    Entries are identified by the DAY- client_order_id tag rather than by
+    side — with shorts enabled, an entry can be a SELL and a cover a BUY,
+    so side alone no longer distinguishes entries from exits. Manual
+    untagged trades no longer consume the session cap (they never had
+    protective bundles anyway).
+    """
     today_et = datetime.now(timezone.utc).astimezone(ET).date()
     start_utc = datetime.combine(today_et, _time(0, 0), tzinfo=ET).astimezone(timezone.utc)
     request = GetOrdersRequest(
         status=QueryOrderStatus.CLOSED,
         after=start_utc,
         symbols=UNIVERSE,
-        side="buy",
-        limit=50,
+        limit=100,
     )
     orders = client.get_orders(filter=request)
-    return sum(1 for o in orders if getattr(o, "filled_at", None) is not None)
+    return sum(
+        1 for o in orders
+        if getattr(o, "filled_at", None) is not None
+        and str(getattr(o, "client_order_id", "") or "").startswith(
+            _CLIENT_ORDER_ID_PREFIX + "-"
+        )
+    )
 
 
 def _gate_daily_loss(client) -> Optional[SkipDecision]:
@@ -200,6 +254,100 @@ def _gate_daily_loss(client) -> Optional[SkipDecision]:
     if pct <= -_DAILY_LOSS_CAP_PCT:
         return SkipDecision(
             False, f"daily_loss_limit_hit_{pct * 100:.2f}pct"
+        )
+    return None
+
+
+def _gate_weekly_loss(client) -> Optional[SkipDecision]:
+    """Weekly loss cap — doc §"Risk caps": −4% from week-start equity
+    stops new entries until the window rolls. Fail-open on infra errors
+    (portfolio history unavailable ≠ strategy violation), matching the
+    crypto strand's posture.
+    """
+    try:
+        hist = client.get_portfolio_history(filter=GetPortfolioHistoryRequest(
+            period="1W", timeframe="1D",
+        ))
+        equities = [e for e in (hist.equity or []) if e is not None and e > 0]
+    except Exception as exc:
+        print(f"[day_trader] weekly cap: portfolio history failed: {exc}",
+              file=sys.stderr)
+        return None
+    if len(equities) < 2:
+        return None
+    weekly_pl = (equities[-1] - equities[0]) / equities[0]
+    if weekly_pl <= -_WEEKLY_LOSS_CAP_PCT:
+        return SkipDecision(
+            False, f"weekly_loss_cap_hit_{weekly_pl * 100:.2f}pct"
+        )
+    return None
+
+
+def _gate_consecutive_losses(
+    lifecycle_stats: dict | None,
+    now_et: datetime | None = None,
+) -> Optional[SkipDecision]:
+    """Doc §"Risk caps" cooldowns, reconstructed statelessly from the
+    lifecycle `sessions` block:
+    - 2 losing trades in TODAY's session → no more entries today.
+    - Last 3 sessions-with-trades all net-negative → pause ~5 trading
+      days (7 calendar days) from the most recent losing session.
+
+    Fail-open when stats are missing or errored (same posture as the
+    expectancy gate).
+    """
+    if not lifecycle_stats or lifecycle_stats.get("error"):
+        return None
+    sessions = lifecycle_stats.get("sessions") or {}
+    if not sessions:
+        return None
+    now_et = now_et or datetime.now(timezone.utc).astimezone(ET)
+    today = now_et.astimezone(ET).date()
+
+    today_stats = sessions.get(today.isoformat())
+    if today_stats and today_stats.get("losing", 0) >= _SESSION_LOSS_STOP_COUNT:
+        return SkipDecision(
+            False,
+            f"session_loss_cooldown_{today_stats['losing']}_losses_today",
+        )
+
+    dates = sorted(sessions.keys())
+    recent = dates[-_LOSING_SESSION_STREAK:]
+    if (len(recent) == _LOSING_SESSION_STREAK
+            and all(sessions[d].get("net_pl", 0.0) < 0 for d in recent)):
+        last_losing = date.fromisoformat(recent[-1])
+        if (today - last_losing).days <= _LOSING_STREAK_PAUSE_CAL_DAYS:
+            return SkipDecision(
+                False,
+                f"losing_streak_pause_until_"
+                f"{last_losing + timedelta(days=_LOSING_STREAK_PAUSE_CAL_DAYS)}",
+            )
+    return None
+
+
+def _gate_spread(symbol: str) -> Optional[SkipDecision]:
+    """Spread cap — skip entries when the IEX top-of-book spread exceeds
+    _SPREAD_CAP_PCT. Fail-open on any fetch problem or degenerate quote:
+    IEX (free feed) legitimately prints empty/zero quotes at quiet
+    moments, and that's a data quirk, not a reason to veto the trade.
+    """
+    try:
+        from src.day_data import get_stock_latest_quote
+        quote = get_stock_latest_quote(symbol)
+        bid = float(getattr(quote, "bid_price", 0) or 0)
+        ask = float(getattr(quote, "ask_price", 0) or 0)
+    except Exception as exc:
+        print(f"[day_trader] spread gate: quote fetch failed for {symbol}: {exc}",
+              file=sys.stderr)
+        return None
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return None
+    mid = (ask + bid) / 2.0
+    spread_pct = (ask - bid) / mid
+    if spread_pct > _SPREAD_CAP_PCT:
+        return SkipDecision(
+            False,
+            f"spread_{spread_pct * 100:.3f}pct_exceeds_{_SPREAD_CAP_PCT * 100:.2f}pct_cap",
         )
     return None
 
@@ -248,13 +396,25 @@ def check_pre_execution_gates(
     `lifecycle_stats` is the dict returned by summarize_day_lifecycle.
     When provided AND its expectancy_warning is active AND the user
     has not set WATCHER_DAY_OVERRIDE_EXPECTANCY=true, new entries are
-    refused. Pass None to bypass the expectancy gate entirely (used by
-    tests).
+    refused. Pass None to bypass the expectancy/cooldown gates entirely
+    (used by tests).
     """
+    direction = setup_result.get("direction", "long")
+
     # Strategy hygiene first — is the sizing valid.
-    sizing = compute_position_size(equity, setup_result["entry"], setup_result["stop"])
+    sizing = compute_position_size(
+        equity, setup_result["entry"], setup_result["stop"], direction=direction,
+    )
     if "skip_reason" in sizing:
         return SkipDecision(False, sizing["skip_reason"])
+
+    # Short-side kill switch — alerts fire regardless, execution is
+    # fail-closed until WATCHER_DAY_ENABLE_SHORTS=true.
+    if direction == "short" and not day_shorts_enabled():
+        return SkipDecision(
+            False,
+            "shorts_disabled (set WATCHER_DAY_ENABLE_SHORTS=true to enable)",
+        )
 
     # Expectancy circuit breaker — checked before any Alpaca calls so the
     # rejection path stays cheap. lifecycle_stats was already computed
@@ -262,6 +422,12 @@ def check_pre_execution_gates(
     expectancy_skip = _gate_expectancy_warning(lifecycle_stats)
     if expectancy_skip is not None:
         return expectancy_skip
+
+    # Consecutive-loss cooldowns (2-loss session stop / losing-streak
+    # pause) — also free, reads the same lifecycle stats.
+    cooldown_skip = _gate_consecutive_losses(lifecycle_stats)
+    if cooldown_skip is not None:
+        return cooldown_skip
 
     # One-position rule — asked of the broker at execution time, not scan
     # time, so a fill earlier in the same scan can't slip a second entry
@@ -290,6 +456,17 @@ def check_pre_execution_gates(
     daily_skip = _gate_daily_loss(client)
     if daily_skip is not None:
         return daily_skip
+
+    # Weekly loss cap.
+    weekly_skip = _gate_weekly_loss(client)
+    if weekly_skip is not None:
+        return weekly_skip
+
+    # Spread cap — last (one extra data call, only on otherwise-passing
+    # trades).
+    spread_skip = _gate_spread(setup_result["symbol"])
+    if spread_skip is not None:
+        return spread_skip
 
     return SkipDecision(True, "")
 
@@ -350,8 +527,14 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     if client is None:
         client = get_client()
 
+    direction = setup_result.get("direction", "long")
+    is_short = direction == "short"
+    entry_side = OrderSide.SELL if is_short else OrderSide.BUY
+    exit_side = OrderSide.BUY if is_short else OrderSide.SELL
+
     sizing = compute_position_size(
-        equity, setup_result["entry"], setup_result["stop"]
+        equity, setup_result["entry"], setup_result["stop"],
+        direction=direction,
     )
     if "skip_reason" in sizing:
         return {
@@ -378,19 +561,21 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
         "oco_tp2": None, "oco_tp2_stop": None,
     }
 
-    # --- 1. Market BUY entry ---
-    # Tag with client_order_id encoding the setup type — D5c lifecycle
-    # stats parses this back out to compute per-setup expectancy.
-    # Format: DAY-{A|B}-{SYMBOL}-{epoch_seconds}. Safely under Alpaca's
-    # 48-char client_order_id limit.
+    # --- 1. Market entry (BUY for longs, SELL-short for shorts) ---
+    # Tag with client_order_id encoding setup type + direction — D5c
+    # lifecycle stats parses this back out for per-setup expectancy AND
+    # to reconstruct short trades (entry side is sell there).
+    # Format: DAY-{A|B|AS|BS}-{SYMBOL}-{epoch_seconds}. Safely under
+    # Alpaca's 48-char client_order_id limit.
+    setup_token = f"{setup_result['setup']}{'S' if is_short else ''}"
     epoch_s = int(datetime.now(timezone.utc).timestamp())
     client_order_id = (
-        f"{_CLIENT_ORDER_ID_PREFIX}-{setup_result['setup']}-"
+        f"{_CLIENT_ORDER_ID_PREFIX}-{setup_token}-"
         f"{symbol}-{epoch_s}"
     )
     try:
         entry_req = MarketOrderRequest(
-            symbol=symbol, qty=shares, side=OrderSide.BUY,
+            symbol=symbol, qty=shares, side=entry_side,
             time_in_force=TimeInForce.DAY,
             client_order_id=client_order_id,
         )
@@ -424,9 +609,11 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     # Alpaca's OCO requires BOTH take_profit and stop_loss children to be
     # explicit. The parent's limit_price alone is rejected with
     # "oco orders require take_profit.limit_price" (error 40010001).
+    # For shorts the OCO children are BUYs: TP limit below entry,
+    # protective stop above.
     try:
         oco1 = client.submit_order(LimitOrderRequest(
-            symbol=symbol, qty=tp1_qty, side=OrderSide.SELL,
+            symbol=symbol, qty=tp1_qty, side=exit_side,
             time_in_force=TimeInForce.DAY,
             limit_price=tp1_px,
             order_class=OrderClass.OCO,
@@ -442,7 +629,7 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     if tp2_qty > 0:
         try:
             oco2 = client.submit_order(LimitOrderRequest(
-                symbol=symbol, qty=tp2_qty, side=OrderSide.SELL,
+                symbol=symbol, qty=tp2_qty, side=exit_side,
                 time_in_force=TimeInForce.DAY,
                 limit_price=tp2_px,
                 order_class=OrderClass.OCO,
@@ -463,6 +650,7 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
         "placed": True,
         "protective_orders_complete": protective_ok,
         "symbol": symbol,
+        "direction": direction,
         "shares": shares,
         "fill_price": fill_price,
         "filled_at": filled_at,
@@ -497,18 +685,37 @@ def _list_orders_since(client, symbol: str, since: datetime, statuses=None):
     return list(client.get_orders(filter=request))
 
 
-def _find_entry_fill(client, symbol: str, now_utc: datetime):
-    """Find the most recent filled BUY order for `symbol`. Returns the
-    order object or None.
+def _position_direction(position) -> str:
+    """"long" or "short", from the position's qty sign (Alpaca reports
+    short positions with negative qty) with the side attribute as a
+    fallback.
+    """
+    try:
+        qty = float(getattr(position, "qty", 0) or 0)
+        if qty < 0:
+            return "short"
+        if qty > 0:
+            return "long"
+    except (TypeError, ValueError):
+        pass
+    side = str(getattr(position, "side", "")).lower()
+    return "short" if side.endswith("short") else "long"
+
+
+def _find_entry_fill(client, symbol: str, now_utc: datetime,
+                     direction: str = "long"):
+    """Find the most recent filled ENTRY order for `symbol` — a BUY for
+    longs, a SELL for shorts. Returns the order object or None.
 
     Used to derive fill_time (for the time stop) and to anchor "since
     entry" predicates.
     """
+    entry_side = "sell" if direction == "short" else "buy"
     since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
     orders = _list_orders_since(client, symbol, since)
     fills = [
         o for o in orders
-        if str(getattr(o, "side", "")).lower().endswith("buy")
+        if str(getattr(o, "side", "")).lower().endswith(entry_side)
         and getattr(o, "filled_at", None) is not None
     ]
     if not fills:
@@ -518,62 +725,95 @@ def _find_entry_fill(client, symbol: str, now_utc: datetime):
     return fills[0]
 
 
-def _find_resting_stop(client, symbol: str, now_utc: datetime):
-    """Return the (single) resting stop SELL order for `symbol`, or None.
-
-    The day-trade entry bundle places exactly one stop-market SELL.
+def _find_resting_stop(client, symbol: str, now_utc: datetime,
+                       direction: str = "long"):
+    """Return the (single) resting protective stop for `symbol`, or None.
+    Exit side: SELL stop for longs, BUY stop for shorts.
     """
+    exit_side = "buy" if direction == "short" else "sell"
     since = now_utc - timedelta(days=_ORDER_HISTORY_LOOKBACK_DAYS)
     orders = _list_orders_since(client, symbol, since)
     for o in orders:
-        is_open = str(getattr(o, "status", "")).lower().split(".")[-1] in (
-            "new", "accepted", "pending_new", "accepted_for_bidding",
-            "held", "partially_filled",
-        )
-        is_sell = str(getattr(o, "side", "")).lower().endswith("sell")
+        is_open = (str(getattr(o, "status", "")).lower().split(".")[-1]
+                   in _OPEN_ORDER_STATUSES)
+        is_exit = str(getattr(o, "side", "")).lower().endswith(exit_side)
         is_stop = str(getattr(o, "order_type", "")).lower().endswith("stop")
-        if is_open and is_sell and is_stop:
+        if is_open and is_exit and is_stop:
             return o
     return None
 
 
-def _detect_tp1_filled(client, symbol: str, since: datetime) -> bool:
-    """True if a non-stop limit SELL has filled for `symbol` since `since`.
+def _detect_tp1_filled(client, symbol: str, since: datetime,
+                       direction: str = "long") -> bool:
+    """True if a non-stop limit EXIT has filled for `symbol` since
+    `since` — a limit SELL for longs, a limit BUY (cover) for shorts.
 
-    A filled limit-sell is unambiguous evidence TP1 fired — the entry
-    bundle only places limit SELLs at TP1 / TP2 prices, and TP1 fires
-    first by construction (lower price).
+    A filled exit limit is unambiguous evidence TP1 fired — the entry
+    bundle only places exit limits at TP1 / TP2 prices, and TP1 fires
+    first by construction (closer to entry).
     """
+    exit_side = "buy" if direction == "short" else "sell"
     orders = _list_orders_since(client, symbol, since)
     for o in orders:
         is_filled = getattr(o, "filled_at", None) is not None
-        is_sell = str(getattr(o, "side", "")).lower().endswith("sell")
+        is_exit = str(getattr(o, "side", "")).lower().endswith(exit_side)
         is_limit = str(getattr(o, "order_type", "")).lower().endswith("limit")
         is_not_stop = "stop" not in str(getattr(o, "order_type", "")).lower()
-        if is_filled and is_sell and is_limit and is_not_stop:
+        if is_filled and is_exit and is_limit and is_not_stop:
             return True
     return False
 
 
+def _open_orders_for(client, symbol: str) -> list:
+    """Open orders for `symbol`, defensively re-filtered by status string
+    so PENDING_CANCEL / already-cancelled orders don't count as open.
+    """
+    orders = client.get_orders(filter=GetOrdersRequest(
+        status=QueryOrderStatus.OPEN, symbols=[symbol],
+    ))
+    return [
+        o for o in orders
+        if str(getattr(o, "status", "")).lower().split(".")[-1]
+        in _OPEN_ORDER_STATUSES
+    ]
+
+
 def _close_position_market(client, symbol: str, position, reason: str,
                            now_utc: datetime) -> dict:
-    """Atomically cancel related orders and market-close the position.
+    """Cancel resting orders, wait for the share reservation to release,
+    then market-close the position.
 
-    Uses Alpaca's `close_position` endpoint, which cancels every order
-    tied to the position and submits the closing order in one server-
-    side step. This avoids the race where the previous cancel + submit
-    sequence would hit "insufficient qty available" because the stop's
-    `held_for_orders` reservation hadn't released yet when the close
-    submitted.
+    Alpaca's `close_position` does NOT cancel related orders server-side
+    — with OCO exits resting it rejects with "insufficient qty available"
+    (code 40310000; live-verified on paper 2026-07-02, both directions).
+    So: explicit cancel sweep first, then poll until no open orders
+    remain (cancellation is async — `held_for_orders` releases with a
+    small lag), then close.
 
     Never raises — failures are captured in the returned dict.
     """
     qty = float(getattr(position, "qty", 0))
     out: dict = {
         "reason": reason,
-        "cancelled_orders": [],  # close_position handles cancellation server-side
+        "cancelled_orders": [],
         "close_order_id": None, "qty": qty, "error": None,
     }
+    try:
+        for o in _open_orders_for(client, symbol):
+            try:
+                client.cancel_order_by_id(o.id)
+                out["cancelled_orders"].append(str(o.id))
+            except Exception as exc:
+                print(f"[day_trader] cancel {getattr(o, 'id', '?')} failed: {exc}",
+                      file=sys.stderr)
+        deadline = time.monotonic() + _CANCEL_RELEASE_TIMEOUT_SEC
+        while _open_orders_for(client, symbol) and time.monotonic() < deadline:
+            time.sleep(_CANCEL_RELEASE_POLL_SEC)
+    except Exception as exc:
+        # Sweep failures shouldn't stop the close attempt — worst case it
+        # fails with the same insufficient-qty error and alerts.
+        print(f"[day_trader] pre-close cancel sweep failed for {symbol}: {exc}",
+              file=sys.stderr)
     try:
         order = client.close_position(symbol)
         out["close_order_id"] = str(getattr(order, "id", "") or "")
@@ -619,9 +859,11 @@ def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
     return out
 
 
-def _spy_broke_vwap_after(spy_5min_with_indicators, entry_fill_time_utc: datetime) -> bool:
-    """True if any closed SPY 5-min bar AFTER our entry fill closed below
-    its session VWAP.
+def _spy_broke_vwap_after(spy_5min_with_indicators, entry_fill_time_utc: datetime,
+                          direction: str = "long") -> bool:
+    """True if any closed SPY 5-min bar AFTER our entry fill closed on the
+    adverse side of its session VWAP — below for longs (buyers lost the
+    tape), ABOVE for shorts (sellers lost it).
 
     `spy_5min_with_indicators` is already pulled + computed by the
     watcher — re-using it here avoids a second Alpaca round-trip.
@@ -637,6 +879,8 @@ def _spy_broke_vwap_after(spy_5min_with_indicators, entry_fill_time_utc: datetim
     after_entry = closed[closed.index > entry_fill_time_utc]
     if len(after_entry) == 0:
         return False
+    if direction == "short":
+        return bool((after_entry["close"] > after_entry["vwap"]).any())
     return bool((after_entry["close"] < after_entry["vwap"]).any())
 
 
@@ -659,6 +903,8 @@ def manage_position(
     if not symbol:
         return None
 
+    direction = _position_direction(position)
+    is_short = direction == "short"
     now_utc = now_et.astimezone(timezone.utc)
     et_clock = now_et.astimezone(ET).time()
 
@@ -673,55 +919,71 @@ def manage_position(
 
     # Reconstruct entry fill — needed for SPY-VWAP-after-entry check
     # AND for time stop.
-    entry_fill = _find_entry_fill(client, symbol, now_utc)
+    entry_fill = _find_entry_fill(client, symbol, now_utc, direction=direction)
     if entry_fill is None:
-        # Position exists but no recent BUY fill — could be a manually
+        # Position exists but no recent entry fill — could be a manually
         # opened position or an Alpaca lag. Bail rather than misbehave.
         return None
     fill_time_utc = entry_fill.filled_at.astimezone(timezone.utc) \
         if entry_fill.filled_at.tzinfo else entry_fill.filled_at.replace(tzinfo=timezone.utc)
     avg_entry = float(getattr(position, "avg_entry_price", 0) or 0)
 
-    # --- 2. SPY VWAP break after our entry ---
-    if _spy_broke_vwap_after(spy_5min_with_indicators, fill_time_utc):
+    # --- 2. SPY VWAP break against our direction after entry ---
+    if _spy_broke_vwap_after(spy_5min_with_indicators, fill_time_utc,
+                             direction=direction):
+        side_word = "above" if is_short else "below"
         res = _close_position_market(
             client, symbol, position,
-            reason="SPY 5-min close below session VWAP after entry",
+            reason=f"SPY 5-min close {side_word} session VWAP after entry",
             now_utc=now_utc,
         )
         return {"action": "hard_exit_spy_vwap_break", "symbol": symbol, **res}
 
     # --- 3. TP1 fill → move stop to breakeven ---
-    tp1_filled = _detect_tp1_filled(client, symbol, fill_time_utc)
-    resting_stop = _find_resting_stop(client, symbol, now_utc)
+    tp1_filled = _detect_tp1_filled(client, symbol, fill_time_utc,
+                                    direction=direction)
+    resting_stop = _find_resting_stop(client, symbol, now_utc,
+                                      direction=direction)
     if tp1_filled and resting_stop is not None:
         stop_px = float(getattr(resting_stop, "stop_price", 0) or 0)
-        # Only move if the current stop is BELOW avg_entry — i.e. we
+        # Only move if the current stop is still on the loss side of
+        # avg_entry (below it for longs, ABOVE it for shorts) — i.e. we
         # haven't already moved it to breakeven on a prior scan.
-        if stop_px < avg_entry:
+        needs_move = (stop_px > avg_entry) if is_short else (stop_px < avg_entry)
+        if stop_px > 0 and needs_move:
             remaining_qty = float(getattr(position, "qty", 0))
             rep = _move_stop_to_breakeven(
                 client, symbol, position, resting_stop, remaining_qty,
             )
             return {"action": "breakeven_move", "symbol": symbol, **rep}
 
-    # --- 4. Time stop: 30 min after fill AND price < entry + 0.25R ---
+    # --- 4. Time stop: 30 min after fill without ≥ 0.25R of progress ---
     minutes_since_fill = (now_utc - fill_time_utc).total_seconds() / 60.0
     if minutes_since_fill >= _TIME_STOP_MINUTES and not tp1_filled:
         # Recover R from the resting stop if we still have it.
         r_value = None
         if resting_stop is not None and avg_entry > 0:
             stop_px = float(getattr(resting_stop, "stop_price", 0) or 0)
-            r_value = avg_entry - stop_px if stop_px > 0 else None
+            if stop_px > 0:
+                r_value = (stop_px - avg_entry) if is_short else (avg_entry - stop_px)
         if r_value is not None and r_value > 0:
             current_price = float(getattr(position, "current_price", 0) or 0)
-            if current_price > 0 and current_price < avg_entry + _TIME_STOP_R_FRACTION * r_value:
+            threshold = (
+                avg_entry - _TIME_STOP_R_FRACTION * r_value if is_short
+                else avg_entry + _TIME_STOP_R_FRACTION * r_value
+            )
+            stalled = (
+                current_price > threshold if is_short
+                else current_price < threshold
+            )
+            if current_price > 0 and stalled:
+                cmp_word = ">" if is_short else "<"
                 res = _close_position_market(
                     client, symbol, position,
                     reason=(
                         f"time stop: {int(minutes_since_fill)} min since fill, "
-                        f"price {current_price:.2f} < entry+0.25R "
-                        f"{avg_entry + _TIME_STOP_R_FRACTION * r_value:.2f}"
+                        f"price {current_price:.2f} {cmp_word} entry±0.25R "
+                        f"{threshold:.2f}"
                     ),
                     now_utc=now_utc,
                 )
@@ -776,11 +1038,14 @@ def manage_open_positions(
 # =========================================================================
 
 
-def _parse_setup_from_client_order_id(client_order_id: str | None) -> str:
-    """Recover setup type from the entry BUY's client_order_id.
+_SETUP_TOKENS = ("A", "B", "AS", "BS")  # AS/BS = short-side variants
 
-    Format: DAY-{A|B}-{SYMBOL}-{epoch_seconds}. Returns 'A', 'B', or
-    'unknown' when the prefix is missing or malformed (covers orders
+
+def _parse_setup_from_client_order_id(client_order_id: str | None) -> str:
+    """Recover setup token from the entry order's client_order_id.
+
+    Format: DAY-{A|B|AS|BS}-{SYMBOL}-{epoch_seconds}. Returns the token
+    or 'unknown' when the prefix is missing or malformed (covers orders
     placed manually or by older code).
     """
     if not client_order_id:
@@ -789,18 +1054,46 @@ def _parse_setup_from_client_order_id(client_order_id: str | None) -> str:
     if len(parts) < 2 or parts[0] != _CLIENT_ORDER_ID_PREFIX:
         return "unknown"
     setup = parts[1]
-    return setup if setup in ("A", "B") else "unknown"
+    return setup if setup in _SETUP_TOKENS else "unknown"
+
+
+def _trade_pl(t: dict) -> float:
+    """Realized P&L of a (closed) trade dict, direction-aware."""
+    entry_value = t["entry_qty"] * t["entry_price"]
+    exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
+    if t.get("direction", "long") == "short":
+        return entry_value - exit_value
+    return exit_value - entry_value
+
+
+def _trade_risk_per_unit(t: dict) -> float | None:
+    """Original per-share risk from the stops seen on the trade. For
+    longs the original stop is the LOWEST stop seen (stops only move up);
+    for shorts it's the HIGHEST (stops only move down). None when no
+    stop was recoverable or the geometry is degenerate.
+    """
+    if not t["stops_seen"]:
+        return None
+    if t.get("direction", "long") == "short":
+        risk = max(t["stops_seen"]) - t["entry_price"]
+    else:
+        risk = t["entry_price"] - min(t["stops_seen"])
+    return risk if risk > 0 else None
 
 
 def _trade_walk_for_symbol(orders_sorted: list) -> list[dict]:
     """Walk a single symbol's CLOSED orders (chronological) and produce
     trade objects.
 
-    A trade opens on filled BUY and closes when sold qty equals the
-    entry qty (or when a new BUY arrives — defensive).
+    A LONG trade opens on a filled BUY (tagged or not — legacy behavior)
+    and closes when sold qty equals the entry qty. A SHORT trade opens on
+    a filled SELL carrying a DAY-{AS|BS} client_order_id tag (short
+    entries are always auto-executed and therefore always tagged) and
+    closes on cover BUYs. Untagged sells with no open trade are ignored,
+    as before.
 
-    Each trade dict carries `setup` recovered from the entry's
-    client_order_id; `stops_seen` (for R reconstruction); `exits`
+    Each trade dict carries `setup` + `direction` recovered from the
+    entry's client_order_id; `stops_seen` (for R reconstruction); `exits`
     list with reason classification (STOP / TP / MGMT_CLOSE); and
     `entry_at` / `last_exit_at` for duration math.
     """
@@ -816,52 +1109,75 @@ def _trade_walk_for_symbol(orders_sorted: list) -> list[dict]:
     def _otype(o):
         return str(getattr(o, "order_type", "")).lower()
 
+    def _open_trade(o, fq, fp, filled_at, direction):
+        return {
+            "symbol": getattr(o, "symbol", ""),
+            "setup": _parse_setup_from_client_order_id(
+                getattr(o, "client_order_id", None)
+            ),
+            "direction": direction,
+            "entry_at": filled_at,
+            "entry_qty": fq,
+            "entry_price": fp,
+            "qty_remaining": fq,
+            "exits": [],
+            "stops_seen": [],
+            "last_exit_at": None,
+        }
+
+    def _record_exit(o, fq, fp, stop_px, filled_at):
+        otype = _otype(o)
+        if "stop" in otype:
+            if stop_px > 0:
+                current["stops_seen"].append(stop_px)
+            reason = "STOP"
+        elif "limit" in otype:
+            reason = "TP"
+        else:
+            reason = "MGMT_CLOSE"
+        if fq > 0:
+            current["exits"].append({"qty": fq, "price": fp, "reason": reason})
+            current["qty_remaining"] -= fq
+            current["last_exit_at"] = filled_at
+
     for o in orders_sorted:
         fq = float(getattr(o, "filled_qty", 0) or 0)
         fp = float(getattr(o, "filled_avg_price", 0) or 0)
         stop_px = float(getattr(o, "stop_price", 0) or 0)
         filled_at = getattr(o, "filled_at", None)
+        setup_token = _parse_setup_from_client_order_id(
+            getattr(o, "client_order_id", None)
+        )
+        is_short_entry_tag = setup_token in ("AS", "BS")
 
-        if _is_buy(o) and fq > 0:
-            if current is not None:
-                trades.append(current)
-            current = {
-                "symbol": getattr(o, "symbol", ""),
-                "setup": _parse_setup_from_client_order_id(
-                    getattr(o, "client_order_id", None)
-                ),
-                "entry_at": filled_at,
-                "entry_qty": fq,
-                "entry_price": fp,
-                "qty_remaining": fq,
-                "exits": [],
-                "stops_seen": [],
-                "last_exit_at": None,
-            }
+        if _is_buy(o):
+            if current is not None and current["direction"] == "short":
+                # Cover BUY: exit fill, or resting BUY-stop carrying the
+                # short's protective stop price (fq == 0 records it only).
+                _record_exit(o, fq, fp, stop_px, filled_at)
+            elif fq > 0:
+                # New long entry (defensively closes any stale trade).
+                if current is not None:
+                    trades.append(current)
+                current = _open_trade(o, fq, fp, filled_at, "long")
+                continue
+            else:
+                continue
+        elif _is_sell(o):
+            if fq > 0 and is_short_entry_tag:
+                # Tagged short entry (defensively closes any stale trade).
+                if current is not None:
+                    trades.append(current)
+                current = _open_trade(o, fq, fp, filled_at, "short")
+                continue
+            if current is None or current["direction"] != "long":
+                # Untagged sells with no open long: nothing to attribute.
+                continue
+            _record_exit(o, fq, fp, stop_px, filled_at)
+        else:
             continue
 
-        if current is None:
-            continue
-
-        otype = _otype(o)
-        if "stop" in otype and _is_sell(o):
-            if stop_px > 0:
-                current["stops_seen"].append(stop_px)
-            if fq > 0:
-                current["exits"].append({"qty": fq, "price": fp, "reason": "STOP"})
-                current["qty_remaining"] -= fq
-                current["last_exit_at"] = filled_at
-        elif _is_sell(o) and "limit" in otype:
-            if fq > 0:
-                current["exits"].append({"qty": fq, "price": fp, "reason": "TP"})
-                current["qty_remaining"] -= fq
-                current["last_exit_at"] = filled_at
-        elif _is_sell(o) and fq > 0:
-            current["exits"].append({"qty": fq, "price": fp, "reason": "MGMT_CLOSE"})
-            current["qty_remaining"] -= fq
-            current["last_exit_at"] = filled_at
-
-        if current["qty_remaining"] < current["entry_qty"] * 0.01:
+        if current is not None and current["qty_remaining"] < current["entry_qty"] * 0.01:
             trades.append(current)
             current = None
 
@@ -876,16 +1192,12 @@ def _aggregate_bucket(trades: list[dict]) -> dict:
     wins = 0
     r_multiples: list[float] = []
     for t in closed:
-        entry_value = t["entry_qty"] * t["entry_price"]
-        exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
-        pl = exit_value - entry_value
+        pl = _trade_pl(t)
         if pl > 0:
             wins += 1
-        if t["stops_seen"]:
-            orig_stop = min(t["stops_seen"])
-            risk_per_unit = t["entry_price"] - orig_stop
-            if risk_per_unit > 0:
-                r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
+        risk_per_unit = _trade_risk_per_unit(t)
+        if risk_per_unit is not None:
+            r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
     return {
         "closed": len(closed),
         "wins": wins,
@@ -914,7 +1226,9 @@ def summarize_day_lifecycle(
           "total_pl_usd": float,
           "mean_r": float | None,  "best_r": float | None, "worst_r": float | None,
           "avg_minutes_in_trade": float | None,
-          "by_setup": {"A": {...}, "B": {...}, "unknown": {...}},
+          "sessions": {iso_date: {net_pl, closed, losing}, ...},
+          "by_setup": {"A": {...}, "B": {...}, "AS": {...}, "BS": {...},
+                       "unknown": {...}},
           "by_symbol": {sym: {...}, ...},
           "expectancy_warning": str | None,
           "error": str | None,   # set when the orders fetch fails
@@ -967,6 +1281,7 @@ def summarize_day_lifecycle(
         "total_pl_usd": 0.0,
         "mean_r": None, "best_r": None, "worst_r": None,
         "avg_minutes_in_trade": None,
+        "sessions": {},
         "by_setup": {},
         "by_symbol": {},
         "expectancy_warning": None,
@@ -975,20 +1290,17 @@ def summarize_day_lifecycle(
 
     r_multiples: list[float] = []
     durations_min: list[float] = []
+    sessions: dict[str, dict] = {}
     for t in closed:
-        entry_value = t["entry_qty"] * t["entry_price"]
-        exit_value = sum(e["qty"] * e["price"] for e in t["exits"])
-        pl = exit_value - entry_value
+        pl = _trade_pl(t)
         stats["total_pl_usd"] += pl
         if pl > 0:
             stats["wins"] += 1
         else:
             stats["losses"] += 1
-        if t["stops_seen"]:
-            orig_stop = min(t["stops_seen"])
-            risk_per_unit = t["entry_price"] - orig_stop
-            if risk_per_unit > 0:
-                r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
+        risk_per_unit = _trade_risk_per_unit(t)
+        if risk_per_unit is not None:
+            r_multiples.append(pl / (t["entry_qty"] * risk_per_unit))
         if t["entry_at"] and t["last_exit_at"]:
             try:
                 dur = (t["last_exit_at"] - t["entry_at"]).total_seconds() / 60.0
@@ -996,6 +1308,20 @@ def summarize_day_lifecycle(
                     durations_min.append(dur)
             except (TypeError, AttributeError):
                 pass
+        # Per-session ledger — feeds the consecutive-loss cooldown gate.
+        if t["entry_at"] is not None:
+            try:
+                session_key = t["entry_at"].astimezone(ET).date().isoformat()
+            except (TypeError, AttributeError):
+                session_key = None
+            if session_key:
+                s = sessions.setdefault(
+                    session_key, {"net_pl": 0.0, "closed": 0, "losing": 0},
+                )
+                s["net_pl"] += pl
+                s["closed"] += 1
+                if pl < 0:
+                    s["losing"] += 1
 
     if stats["total_closed"] > 0:
         stats["win_rate"] = stats["wins"] / stats["total_closed"]
@@ -1012,12 +1338,15 @@ def summarize_day_lifecycle(
             )
     if durations_min:
         stats["avg_minutes_in_trade"] = sum(durations_min) / len(durations_min)
+    stats["sessions"] = sessions
 
-    # Per-setup and per-symbol breakdowns.
-    by_setup_trades: dict[str, list[dict]] = {"A": [], "B": [], "unknown": []}
+    # Per-setup and per-symbol breakdowns. AS/BS are the short variants.
+    by_setup_trades: dict[str, list[dict]] = {
+        "A": [], "B": [], "AS": [], "BS": [], "unknown": [],
+    }
     by_symbol_trades: dict[str, list[dict]] = {}
     for t in all_trades:
-        by_setup_trades[t["setup"]].append(t)
+        by_setup_trades.setdefault(t["setup"], []).append(t)
         by_symbol_trades.setdefault(t["symbol"], []).append(t)
     for setup, trades in by_setup_trades.items():
         stats["by_setup"][setup] = _aggregate_bucket(trades)

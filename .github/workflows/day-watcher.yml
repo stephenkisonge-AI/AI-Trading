@@ -63,6 +63,10 @@ jobs:
           # Hard-refused unless ALPACA_PAPER_TRADE=True — see
           # src/day_trader.py:day_auto_execute_enabled().
           WATCHER_DAY_AUTO_EXECUTE: ${{ secrets.WATCHER_DAY_AUTO_EXECUTE }}
+          # Short-side kill switch — "true" allows auto-execution of the
+          # A-Short/B-Short setups (BEARISH regime only). Off = shorts
+          # alert but never execute. See day_trader.day_shorts_enabled().
+          WATCHER_DAY_ENABLE_SHORTS: ${{ secrets.WATCHER_DAY_ENABLE_SHORTS }}
           # Self-heal heartbeat — healthchecks.io ping URL. On each clean
           # scan the watcher pings this; if scans stop (runner/billing
           # outage, crash) healthchecks.io alerts you directly. Unset = the

@@ -20,7 +20,7 @@ from typing import Optional
 import pandas as pd
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from src.data import _require_env
@@ -88,6 +88,21 @@ def get_stock_bars(
     if df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
     return df.sort_index()
+
+
+def get_stock_latest_quote(symbol: str):
+    """Latest top-of-book bid/ask for `symbol` from the IEX feed (free
+    tier). Raises on API failure — the caller (spread gate) treats any
+    failure as fail-open, since IEX quote gaps are a data quirk, not a
+    trade veto.
+    """
+    client = _get_stock_data_client()
+    quotes = client.get_stock_latest_quote(StockLatestQuoteRequest(
+        symbol_or_symbols=symbol, feed=DataFeed.IEX,
+    ))
+    if symbol not in quotes:
+        raise RuntimeError(f"No quote returned for {symbol}")
+    return quotes[symbol]
 
 
 def get_pre_market_high_low(

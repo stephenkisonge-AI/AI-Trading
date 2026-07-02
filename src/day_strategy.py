@@ -265,6 +265,27 @@ def _find_vwap_touch(
     return None
 
 
+def _find_vwap_touch_from_below(
+    cand_5min_df: pd.DataFrame, lookback: int = _VWAP_TOUCH_LOOKBACK,
+) -> dict | None:
+    """Short-side mirror of `_find_vwap_touch`: a bar whose HIGH ≥ VWAP —
+    a rally that tagged VWAP from below (the rejection point). Returns
+    {touch_ts, touch_high, vwap_at_touch} for the most recent such bar,
+    excluding the current (rejection) candle.
+    """
+    if len(cand_5min_df) < 2:
+        return None
+    scan = cand_5min_df.iloc[-(lookback + 1):-1]
+    for ts, row in reversed(list(scan.iterrows())):
+        high = row.get("high")
+        vwap = row.get("vwap")
+        if pd.isna(high) or pd.isna(vwap):
+            continue
+        if high >= vwap:
+            return {"touch_ts": ts, "touch_high": float(high), "vwap_at_touch": float(vwap)}
+    return None
+
+
 def _prior_intraday_high(cand_5min_df: pd.DataFrame) -> float | None:
     """Highest high in the session BEFORE the most recent bar. Used to
     test the ≥ 2R target requirement for Setup B."""
@@ -276,15 +297,37 @@ def _prior_intraday_high(cand_5min_df: pd.DataFrame) -> float | None:
     return float(prior["high"].max())
 
 
+def _prior_intraday_low(cand_5min_df: pd.DataFrame) -> float | None:
+    """Lowest low in the session BEFORE the most recent bar. Short-side
+    mirror: the ≥ 2R downside target for Setup B-Short."""
+    if len(cand_5min_df) < 2:
+        return None
+    prior = cand_5min_df.iloc[:-1]
+    if len(prior) == 0:
+        return None
+    return float(prior["low"].min())
+
+
 def _no_chase_violation(
     current_price: float, trigger_price: float, atr_value: float,
 ) -> bool:
     """True if `current_price` has run > _NO_CHASE_ATR_MULT × ATR past the
-    `trigger_price` (upward). Both setups skip when this is True.
+    `trigger_price` (upward). Long setups skip when this is True.
     """
     if pd.isna(atr_value) or atr_value <= 0:
         return False
     return (current_price - trigger_price) > _NO_CHASE_ATR_MULT * atr_value
+
+
+def _no_chase_violation_short(
+    current_price: float, trigger_price: float, atr_value: float,
+) -> bool:
+    """Short-side mirror: price has already FALLEN > _NO_CHASE_ATR_MULT ×
+    ATR below the trigger without pulling back — the move is missed.
+    """
+    if pd.isna(atr_value) or atr_value <= 0:
+        return False
+    return (trigger_price - current_price) > _NO_CHASE_ATR_MULT * atr_value
 
 
 def _check(name: str, passed: bool, detail: str) -> dict:
@@ -427,6 +470,7 @@ def evaluate_setup_a(
     qualified = all(c["passed"] for c in conditions)
     result = {
         "setup": "A",
+        "direction": "long",
         "symbol": symbol,
         "qualified": qualified,
         "conditions": conditions,
@@ -585,6 +629,7 @@ def evaluate_setup_b(
     qualified = all(c["passed"] for c in conditions)
     result = {
         "setup": "B",
+        "direction": "long",
         "symbol": symbol,
         "qualified": qualified,
         "conditions": conditions,
@@ -601,6 +646,320 @@ def evaluate_setup_b(
         result["atr"] = atr_val
         result["tp1"] = last_close + r
         result["tp2"] = last_close + 2 * r
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Short-side setups — mirror images, armed only in a BEARISH daily regime
+#
+# Rationale (canonical intraday practice — ORB works in both directions,
+# and VWAP rejection shorts in downtrends are the standard mirror of VWAP
+# reclaim longs): the long-only rule made the day strand fully idle in any
+# bearish tape. These setups keep every risk cap, time window, and no-trade
+# condition identical; only the direction of the edge flips. Execution of
+# shorts additionally requires WATCHER_DAY_ENABLE_SHORTS=true (fail-closed,
+# same philosophy as the auto-execute kill switch) — alerts always fire.
+# ---------------------------------------------------------------------------
+
+
+def evaluate_setup_a_short(
+    *,
+    symbol: str,
+    now_et: datetime,
+    spy_daily_df: pd.DataFrame,
+    spy_5min_df: pd.DataFrame,
+    cand_5min_df: pd.DataFrame,
+    has_position: bool,
+    in_earnings_blackout: bool,
+    overnight_gap_pct: float,
+) -> dict:
+    """Setup A-Short — Opening Range Breakdown. Mirror of evaluate_setup_a:
+    5-min close BELOW the ORL in a bearish regime/session, stop at the OR
+    midpoint (above), targets below.
+    """
+    conditions: list[dict] = []
+
+    regime = classify_regime(spy_daily_df)
+    intraday = classify_intraday_character(spy_5min_df)
+
+    # C1 — Daily regime BEARISH AND intraday bearish or mixed.
+    cond1 = regime == "BEARISH" and intraday in ("BEARISH", "MIXED")
+    conditions.append(_check(
+        "daily_regime_bearish_and_intraday_character",
+        cond1, f"regime={regime} intraday={intraday}",
+    ))
+
+    # C2 — Same morning window as the long ORB.
+    cond2 = _in_time_window(now_et, _SETUP_A_WINDOW_START, _SETUP_A_WINDOW_END)
+    conditions.append(_check(
+        "in_setup_a_time_window",
+        cond2, f"now_et={now_et.isoformat()} window=[09:45,10:30)",
+    ))
+
+    # C3 — Opening range identified.
+    or_levels = opening_range(cand_5min_df, session_date_et=now_et.date())
+    cond3 = or_levels is not None
+    conditions.append(_check(
+        "opening_range_identified",
+        cond3, f"or={or_levels}",
+    ))
+
+    orh, orl = or_levels if or_levels else (None, None)
+
+    # C4 — Most recent closed 5-min candle closed BELOW ORL.
+    last = cand_5min_df.iloc[-1] if len(cand_5min_df) > 0 else None
+    last_close = float(last["close"]) if last is not None else None
+    cond4 = orl is not None and last_close is not None and last_close < orl
+    conditions.append(_check(
+        "5min_close_below_orl",
+        cond4, f"close={last_close} orl={orl}",
+    ))
+
+    # C5 — Bar-RVOL on the breakdown candle ≥ threshold (same as long).
+    bar_rvol_val = float(last["bar_rvol"]) if last is not None and pd.notna(last.get("bar_rvol")) else None
+    cond5 = bar_rvol_val is not None and bar_rvol_val >= _SETUP_A_BAR_RVOL_MIN
+    conditions.append(_check(
+        "bar_rvol_above_threshold",
+        cond5, f"bar_rvol={bar_rvol_val} threshold={_SETUP_A_BAR_RVOL_MIN}x",
+    ))
+
+    # C6 — Price BELOW session VWAP at the moment of breakdown.
+    vwap_val = float(last["vwap"]) if last is not None and pd.notna(last.get("vwap")) else None
+    cond6 = vwap_val is not None and last_close is not None and last_close < vwap_val
+    conditions.append(_check(
+        "below_session_vwap",
+        cond6, f"close={last_close} vwap={vwap_val}",
+    ))
+
+    # C7 — 5-min EMA 9 < EMA 20 (intraday downtrend).
+    ema9 = float(last["ema9"]) if last is not None and pd.notna(last.get("ema9")) else None
+    ema20 = float(last["ema20"]) if last is not None and pd.notna(last.get("ema20")) else None
+    cond7 = ema9 is not None and ema20 is not None and ema9 < ema20
+    conditions.append(_check(
+        "ema9_below_ema20",
+        cond7, f"ema9={ema9} ema20={ema20}",
+    ))
+
+    # C8 — Stop at OR midpoint (ABOVE entry), distance within the same
+    # floor/cap, and not chased too far below the ORL.
+    atr_val = float(last["atr14"]) if last is not None and pd.notna(last.get("atr14")) else None
+    stop = None
+    stop_dist = None
+    no_chase_violated = False
+    if orh is not None and orl is not None and last_close is not None and atr_val:
+        stop = (orh + orl) / 2.0
+        stop_dist = stop - last_close
+        no_chase_violated = _no_chase_violation_short(last_close, orl, atr_val)
+    cond8 = (
+        stop is not None
+        and stop_dist is not None
+        and stop_dist > 0
+        and atr_val is not None
+        and stop_dist <= _STOP_ATR_CAP * atr_val
+        and stop_dist >= _MIN_STOP_DIST_PCT * last_close
+        and not no_chase_violated
+    )
+    conditions.append(_check(
+        "stop_at_or_midpoint_within_atr_cap",
+        cond8,
+        f"stop={stop} stop_dist={stop_dist} atr14={atr_val} "
+        f"cap={_STOP_ATR_CAP}xATR floor={_MIN_STOP_DIST_PCT:.1%} "
+        f"no_chase_violation={no_chase_violated}",
+    ))
+
+    # C9 — No earnings + no gap (same both directions — gap days are gap
+    # days, not setup days, regardless of side).
+    gap_ok = abs(overnight_gap_pct) <= _OVERNIGHT_GAP_PCT
+    cond9 = (not in_earnings_blackout) and gap_ok
+    conditions.append(_check(
+        "no_earnings_and_no_gap",
+        cond9,
+        f"earnings_blackout={in_earnings_blackout} gap_pct={overnight_gap_pct} "
+        f"gap_cap={_OVERNIGHT_GAP_PCT}",
+    ))
+
+    # C10 — No existing position.
+    cond10 = not has_position
+    conditions.append(_check(
+        "no_existing_position", cond10, f"has_position={has_position}",
+    ))
+
+    qualified = all(c["passed"] for c in conditions)
+    result = {
+        "setup": "A",
+        "direction": "short",
+        "symbol": symbol,
+        "qualified": qualified,
+        "conditions": conditions,
+        "entry": None,
+        "stop": None,
+        "atr": None,
+        "tp1": None,
+        "tp2": None,
+    }
+    if qualified:
+        # R = stop − entry (stop above). TP1 at −1R, TP2 at −2R.
+        r = stop - last_close
+        result["entry"] = last_close
+        result["stop"] = stop
+        result["atr"] = atr_val
+        result["tp1"] = last_close - r
+        result["tp2"] = last_close - 2 * r
+    return result
+
+
+def evaluate_setup_b_short(
+    *,
+    symbol: str,
+    now_et: datetime,
+    spy_daily_df: pd.DataFrame,
+    spy_5min_df: pd.DataFrame,
+    cand_5min_df: pd.DataFrame,
+    has_position: bool,
+    in_earnings_blackout: bool,
+    overnight_gap_pct: float,
+) -> dict:
+    """Setup B-Short — VWAP Rejection Continuation. Mirror of
+    evaluate_setup_b: a rally tags VWAP from below and gets rejected with
+    a red close back under it, in a bearish regime/session.
+    """
+    conditions: list[dict] = []
+
+    regime = classify_regime(spy_daily_df)
+    intraday = classify_intraday_character(spy_5min_df)
+
+    # C1 — Daily regime BEARISH AND intraday BEARISH (no MIXED for B).
+    cond1 = regime == "BEARISH" and intraday == "BEARISH"
+    conditions.append(_check(
+        "daily_regime_bearish_and_intraday_bearish",
+        cond1, f"regime={regime} intraday={intraday}",
+    ))
+
+    # C2 — Same Setup B windows.
+    cond2 = _in_any_window(now_et, _SETUP_B_WINDOWS)
+    conditions.append(_check(
+        "in_setup_b_time_window",
+        cond2,
+        f"now_et={now_et.isoformat()} "
+        f"windows=[09:45-11:30, 14:00-15:00)",
+    ))
+
+    # C3 — A session rally touched VWAP from below (the rejection point).
+    touch = _find_vwap_touch_from_below(cand_5min_df)
+    cond3 = touch is not None
+    conditions.append(_check(
+        "vwap_touch_in_recent_rally",
+        cond3, f"touch={touch}",
+    ))
+
+    # C4 — Most recent closed 5-min candle is RED and closes BELOW VWAP.
+    last = cand_5min_df.iloc[-1] if len(cand_5min_df) > 0 else None
+    last_open = float(last["open"]) if last is not None else None
+    last_close = float(last["close"]) if last is not None else None
+    last_vwap = float(last["vwap"]) if last is not None and pd.notna(last.get("vwap")) else None
+    is_red = last_open is not None and last_close is not None and last_close < last_open
+    below_vwap = last_close is not None and last_vwap is not None and last_close < last_vwap
+    cond4 = is_red and below_vwap
+    conditions.append(_check(
+        "red_5min_close_below_vwap",
+        cond4, f"open={last_open} close={last_close} vwap={last_vwap} red={is_red}",
+    ))
+
+    # C5 — 5-min EMA 9 < EMA 20.
+    ema9 = float(last["ema9"]) if last is not None and pd.notna(last.get("ema9")) else None
+    ema20 = float(last["ema20"]) if last is not None and pd.notna(last.get("ema20")) else None
+    cond5 = ema9 is not None and ema20 is not None and ema9 < ema20
+    conditions.append(_check(
+        "ema9_below_ema20",
+        cond5, f"ema9={ema9} ema20={ema20}",
+    ))
+
+    # C6 — Bar-RVOL on the rejection candle ≥ threshold (same as long B).
+    bar_rvol_val = float(last["bar_rvol"]) if last is not None and pd.notna(last.get("bar_rvol")) else None
+    cond6 = bar_rvol_val is not None and bar_rvol_val >= _SETUP_B_BAR_RVOL_MIN
+    conditions.append(_check(
+        "bar_rvol_above_threshold",
+        cond6, f"bar_rvol={bar_rvol_val} threshold={_SETUP_B_BAR_RVOL_MIN}x",
+    ))
+
+    # C8 (computed first — C7 needs the stop) — Stop = touch_high + 0.25×ATR.
+    atr_val = float(last["atr14"]) if last is not None and pd.notna(last.get("atr14")) else None
+    stop = None
+    stop_dist = None
+    no_chase_violated = False
+    if touch is not None and atr_val is not None and last_close is not None:
+        stop = touch["touch_high"] + _SETUP_B_STOP_BUFFER_ATR * atr_val
+        stop_dist = stop - last_close
+        no_chase_violated = _no_chase_violation_short(
+            last_close, touch["vwap_at_touch"], atr_val,
+        )
+
+    # C7 — Clear prior intraday LOW below current price giving ≥ 2R.
+    prior_low = _prior_intraday_low(cand_5min_df)
+    has_2r_target = False
+    if prior_low is not None and stop_dist is not None and stop_dist > 0:
+        reward = last_close - prior_low
+        has_2r_target = reward >= _RR_MIN * stop_dist
+    cond7 = has_2r_target
+    conditions.append(_check(
+        "prior_low_gives_2r_target",
+        cond7,
+        f"prior_low={prior_low} entry={last_close} stop_dist={stop_dist} rr_min={_RR_MIN}",
+    ))
+
+    cond8 = (
+        stop is not None
+        and stop_dist is not None
+        and stop_dist > 0
+        and atr_val is not None
+        and stop_dist <= _STOP_ATR_CAP * atr_val
+        and stop_dist >= _MIN_STOP_DIST_PCT * last_close
+        and not no_chase_violated
+    )
+    conditions.append(_check(
+        "stop_above_vwap_touch_within_atr_cap",
+        cond8,
+        f"stop={stop} stop_dist={stop_dist} atr14={atr_val} "
+        f"cap={_STOP_ATR_CAP}xATR floor={_MIN_STOP_DIST_PCT:.1%} "
+        f"no_chase_violation={no_chase_violated}",
+    ))
+
+    # C9 — No earnings + no gap.
+    gap_ok = abs(overnight_gap_pct) <= _OVERNIGHT_GAP_PCT
+    cond9 = (not in_earnings_blackout) and gap_ok
+    conditions.append(_check(
+        "no_earnings_and_no_gap",
+        cond9,
+        f"earnings_blackout={in_earnings_blackout} gap_pct={overnight_gap_pct} "
+        f"gap_cap={_OVERNIGHT_GAP_PCT}",
+    ))
+
+    # C10 — No existing position.
+    cond10 = not has_position
+    conditions.append(_check(
+        "no_existing_position", cond10, f"has_position={has_position}",
+    ))
+
+    qualified = all(c["passed"] for c in conditions)
+    result = {
+        "setup": "B",
+        "direction": "short",
+        "symbol": symbol,
+        "qualified": qualified,
+        "conditions": conditions,
+        "entry": None,
+        "stop": None,
+        "atr": None,
+        "tp1": None,
+        "tp2": None,
+    }
+    if qualified:
+        r = stop - last_close
+        result["entry"] = last_close
+        result["stop"] = stop
+        result["atr"] = atr_val
+        result["tp1"] = last_close - r
+        result["tp2"] = last_close - 2 * r
     return result
 
 

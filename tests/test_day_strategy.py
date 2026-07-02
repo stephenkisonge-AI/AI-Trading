@@ -11,7 +11,9 @@ from src.day_strategy import (
     classify_regime,
     compute_regime_details,
     evaluate_setup_a,
+    evaluate_setup_a_short,
     evaluate_setup_b,
+    evaluate_setup_b_short,
     pick_winner,
 )
 
@@ -541,3 +543,155 @@ def test_setup_b_accepts_stop_just_above_floor():
     result = _eval_b(_setup_b_with_stop(touch_low=99.70))
     failed = {c["name"] for c in result["conditions"] if not c["passed"]}
     assert result["qualified"], f"adequate stop should still qualify; failed={failed}"
+
+
+# ---------------------------------------------------------------------------
+# Short-side setups — A-Short (ORB Breakdown) and B-Short (VWAP Rejection)
+# ---------------------------------------------------------------------------
+
+
+def _bearish_spy_daily() -> pd.DataFrame:
+    return _daily_df([300.0 - i * 0.5 for i in range(250)])
+
+
+def _bearish_spy_5min(session_date: date) -> pd.DataFrame:
+    # SPY close below VWAP and below EMA9 → intraday BEARISH.
+    return _5min_bars(
+        session_date, [0],
+        opens=[400], highs=[400], lows=[396], closes=[397], volumes=[1000],
+        vwaps=[399.0], ema9s=[398.0], ema20s=[399.0],
+    )
+
+
+def _setup_a_short_candidate_passing() -> pd.DataFrame:
+    """Mirror of the long ORB fixture: OR bars 9:30/9:35/9:40, breakdown
+    bar at 9:45 closing below ORL. ORH=100.5, ORL=98 → stop at midpoint
+    99.25, entry 95, stop_dist 4.25 ≤ 1.5×ATR(4)=6, no-chase 98−95=3 ≤ 6.
+    """
+    return _5min_bars(
+        date(2026, 5, 27), [0, 5, 10, 15],
+        opens=[100, 99, 99, 98],
+        highs=[100.5, 99.5, 100.0, 98.0],
+        lows=[99.0, 98.0, 98.5, 94.5],
+        closes=[99.5, 98.5, 99.0, 95.0],
+        volumes=[100, 100, 100, 500],
+        vwaps=[100.0, 99.5, 99.5, 99.0],
+        ema9s=[100.0, 99.5, 99.2, 98.0],
+        ema20s=[100.5, 100.0, 99.8, 99.0],
+        atrs=[1.0, 1.0, 1.0, 4.0],
+        bar_rvols=[1.0, 1.0, 1.0, 2.0],
+    )
+
+
+def test_setup_a_short_qualifies_in_bearish_regime():
+    result = evaluate_setup_a_short(
+        symbol="NVDA",
+        now_et=_et_dt(date(2026, 5, 27), time(9, 50)),
+        spy_daily_df=_bearish_spy_daily(),
+        spy_5min_df=_bearish_spy_5min(date(2026, 5, 27)),
+        cand_5min_df=_setup_a_short_candidate_passing(),
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=-0.005,
+    )
+    failed = [c for c in result["conditions"] if not c["passed"]]
+    assert result["qualified"], f"failed: {failed}"
+    assert result["direction"] == "short"
+    assert result["entry"] == pytest.approx(95.0)
+    # Stop at OR midpoint (100.5 + 98) / 2 = 99.25, ABOVE entry.
+    assert result["stop"] == pytest.approx(99.25)
+    # R = 99.25 − 95 = 4.25; TP1 = 90.75, TP2 = 86.5 (below entry).
+    assert result["tp1"] == pytest.approx(90.75)
+    assert result["tp2"] == pytest.approx(86.5)
+
+
+def test_setup_a_short_rejected_in_bullish_regime():
+    result = evaluate_setup_a_short(
+        symbol="NVDA",
+        now_et=_et_dt(date(2026, 5, 27), time(9, 50)),
+        spy_daily_df=_bullish_spy_daily(),  # wrong regime for shorts
+        spy_5min_df=_bearish_spy_5min(date(2026, 5, 27)),
+        cand_5min_df=_setup_a_short_candidate_passing(),
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=0.0,
+    )
+    assert not result["qualified"]
+    c1 = result["conditions"][0]
+    assert c1["name"] == "daily_regime_bearish_and_intraday_character"
+    assert not c1["passed"]
+
+
+def _setup_b_short_candidate_passing() -> pd.DataFrame:
+    """Early plunge sets prior low 92, rally tags VWAP from below at the
+    9:40 bar (high 100.4 ≥ vwap 100.2), rejection red bar at 9:45 closes
+    back below VWAP. Stop = 100.4 + 0.25×ATR(2) = 100.9, dist 2.3 ≤ 3;
+    reward to prior low = 98.6 − 92 = 6.6 ≥ 2R (4.6).
+    """
+    return _5min_bars(
+        date(2026, 5, 27), [0, 5, 10, 15],
+        opens=[101, 97, 97.5, 99.5],
+        highs=[101.5, 98.0, 100.4, 99.6],
+        lows=[92.0, 96.5, 97.0, 98.4],
+        closes=[97.0, 97.5, 99.5, 98.6],
+        volumes=[500, 300, 400, 450],
+        vwaps=[100.5, 100.2, 100.2, 99.9],
+        ema9s=[None, None, 99.0, 98.5],
+        ema20s=[None, None, 99.5, 99.0],
+        atrs=[None, None, 2.0, 2.0],
+        bar_rvols=[None, None, 1.2, 1.5],
+    )
+
+
+def test_setup_b_short_qualifies_in_bearish_regime():
+    result = evaluate_setup_b_short(
+        symbol="NVDA",
+        now_et=_et_dt(date(2026, 5, 27), time(9, 50)),
+        spy_daily_df=_bearish_spy_daily(),
+        spy_5min_df=_bearish_spy_5min(date(2026, 5, 27)),
+        cand_5min_df=_setup_b_short_candidate_passing(),
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=-0.01,
+    )
+    failed = [c for c in result["conditions"] if not c["passed"]]
+    assert result["qualified"], f"failed: {failed}"
+    assert result["direction"] == "short"
+    assert result["entry"] == pytest.approx(98.6)
+    assert result["stop"] == pytest.approx(100.9)
+    # R = 2.3 → TP1 = 96.3, TP2 = 94.0.
+    assert result["tp1"] == pytest.approx(96.3)
+    assert result["tp2"] == pytest.approx(94.0)
+
+
+def test_setup_b_short_requires_red_close_below_vwap():
+    cand = _setup_b_short_candidate_passing()
+    # Make the last bar green and above VWAP — rejection never happened.
+    cand.iloc[-1, cand.columns.get_loc("close")] = 100.5
+    result = evaluate_setup_b_short(
+        symbol="NVDA",
+        now_et=_et_dt(date(2026, 5, 27), time(9, 50)),
+        spy_daily_df=_bearish_spy_daily(),
+        spy_5min_df=_bearish_spy_5min(date(2026, 5, 27)),
+        cand_5min_df=cand,
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=0.0,
+    )
+    assert not result["qualified"]
+    by_name = {c["name"]: c for c in result["conditions"]}
+    assert not by_name["red_5min_close_below_vwap"]["passed"]
+
+
+def test_long_setups_carry_direction_field():
+    result = evaluate_setup_a(
+        symbol="NVDA",
+        now_et=_et_dt(date(2026, 5, 27), time(9, 50)),
+        spy_daily_df=_bullish_spy_daily(),
+        spy_5min_df=_bullish_spy_5min(date(2026, 5, 27)),
+        cand_5min_df=_setup_a_candidate_passing(),
+        has_position=False,
+        in_earnings_blackout=False,
+        overnight_gap_pct=0.0,
+    )
+    assert result["direction"] == "long"

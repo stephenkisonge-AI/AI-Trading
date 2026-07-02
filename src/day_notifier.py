@@ -70,27 +70,38 @@ def format_setup_alert(
     src/day_strategy.py.
     """
     setup = result["setup"]
+    direction = result.get("direction", "long")
+    is_short = direction == "short"
     symbol = result["symbol"]
     entry = result["entry"]
     stop = result["stop"]
     tp1 = result["tp1"]
     tp2 = result["tp2"]
     atr = result.get("atr")
-    stop_pct = (entry - stop) / entry * 100 if entry and stop else None
+    risk_pct = abs(entry - stop) / entry * 100 if entry and stop else None
 
     lines: list[str] = []
-    setup_name = "ORB" if setup == "A" else "VWAP Reclaim"
-    lines.append(f"🟢 DAY-TRADE QUALIFIED — Setup {setup} ({setup_name}) on {symbol}")
+    if is_short:
+        setup_name = "ORB Breakdown" if setup == "A" else "VWAP Rejection"
+        icon = "🔻"
+    else:
+        setup_name = "ORB" if setup == "A" else "VWAP Reclaim"
+        icon = "🟢"
+    lines.append(
+        f"{icon} DAY-TRADE QUALIFIED — Setup {setup} {direction.upper()} "
+        f"({setup_name}) on {symbol}"
+    )
     lines.append("")
     lines.append(f"Regime: SPY daily {daily_regime} | intraday {intraday_character}")
     lines.append("")
-    lines.append(f"Entry: ${entry:.2f}")
-    if stop is not None and stop_pct is not None:
-        lines.append(f"Stop:  ${stop:.2f} ({-stop_pct:.2f}%)")
+    lines.append(f"Entry: ${entry:.2f} ({'sell short' if is_short else 'buy'})")
+    if stop is not None and risk_pct is not None:
+        lines.append(f"Stop:  ${stop:.2f} ({risk_pct:.2f}% risk)")
+    exit_word = "cover" if is_short else "sell"
     if tp1 is not None:
-        lines.append(f"TP1:   ${tp1:.2f}  (+1R, sell 50%, then stop → breakeven)")
+        lines.append(f"TP1:   ${tp1:.2f}  (+1R, {exit_word} 50%, then stop → breakeven)")
     if tp2 is not None:
-        lines.append(f"TP2:   ${tp2:.2f}  (+2R, sell remaining 50%)")
+        lines.append(f"TP2:   ${tp2:.2f}  (+2R, {exit_word} remaining 50%)")
     if atr:
         lines.append(f"ATR(14, 5-min): {atr:.4f}")
     lines.append("")
@@ -141,7 +152,7 @@ def format_lifecycle_block(stats: dict) -> list[str]:
     )
     by_setup = stats.get("by_setup") or {}
     setup_parts = []
-    for setup in ("A", "B", "unknown"):
+    for setup in ("A", "B", "AS", "BS", "unknown"):
         bucket = by_setup.get(setup) or {}
         n = bucket.get("closed", 0)
         if n == 0:

@@ -585,10 +585,29 @@ def _cancel_open_orders(client, symbol_no_slash: str) -> list[str]:
     return cancelled
 
 
+_CANCEL_RELEASE_TIMEOUT_SEC = 15
+_CANCEL_RELEASE_POLL_SEC = 0.5
+
+
 def _close_position_market(client, symbol: str, position, reason: str) -> dict:
-    """Cancel all open orders for the symbol, then market-sell the position."""
+    """Cancel all open orders for the symbol, wait for the qty hold to
+    release (cancellation is async — submitting the close too early hits
+    "insufficient qty available"), then market-sell the position.
+    """
     symbol_no_slash = _alpaca_position_symbol(symbol)
     cancelled = _cancel_open_orders(client, symbol_no_slash)
+    if cancelled:
+        deadline = time.monotonic() + _CANCEL_RELEASE_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            try:
+                still_open = client.get_orders(filter=GetOrdersRequest(
+                    status=QueryOrderStatus.OPEN, symbols=[symbol_no_slash],
+                ))
+            except Exception:
+                break
+            if not still_open:
+                break
+            time.sleep(_CANCEL_RELEASE_POLL_SEC)
     qty = float(position.qty)
     out: dict = {
         "reason": reason,

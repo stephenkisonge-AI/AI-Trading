@@ -188,12 +188,10 @@ class FakeClient:
             filled_at=None,
             legs=None,
         )
-        # Market BUY auto-fills for the test path.
-        is_market_buy = (
-            request.__class__.__name__ == "MarketOrderRequest"
-            and str(side).lower().endswith("buy")
-        )
-        if is_market_buy and self.fill_price is not None:
+        # Market orders auto-fill for the test path (BUY entries for
+        # longs, SELL-short entries for shorts).
+        is_market = request.__class__.__name__ == "MarketOrderRequest"
+        if is_market and self.fill_price is not None:
             rec.filled_avg_price = str(self.fill_price)
             # Production code stringifies status and checks .endswith("filled")
             # — that works against the real alpaca-py OrderStatus enum (which
@@ -256,14 +254,32 @@ def test_gates_allow_when_clean():
 
 
 def test_gates_reject_when_3_trades_already_today():
+    # Session cap counts filled DAY-tagged entries (side-agnostic now
+    # that shorts exist) — untagged manual fills don't consume the cap.
     today_filled = [
-        SimpleNamespace(filled_at=datetime(2026, 5, 27, 14, 0, tzinfo=timezone.utc))
-        for _ in range(3)
+        SimpleNamespace(
+            filled_at=datetime(2026, 5, 27, 14, 0, tzinfo=timezone.utc),
+            client_order_id=f"DAY-A-NVDA-{i}",
+        )
+        for i in range(3)
     ]
     client = FakeClient(orders=today_filled)
     decision = check_pre_execution_gates(client, _setup_result(), equity=100_000)
     assert decision.allowed is False
     assert "session_trade_cap" in decision.reason
+
+
+def test_session_cap_ignores_untagged_manual_fills():
+    today_filled = [
+        SimpleNamespace(
+            filled_at=datetime(2026, 5, 27, 14, 0, tzinfo=timezone.utc),
+            client_order_id=None,
+        )
+        for _ in range(3)
+    ]
+    client = FakeClient(orders=today_filled)
+    decision = check_pre_execution_gates(client, _setup_result(), equity=100_000)
+    assert decision.allowed is True
 
 
 def test_gates_reject_on_daily_loss_cap():
@@ -503,6 +519,11 @@ class MgmtFakeClient(FakeClient):
 
     def cancel_order_by_id(self, order_id):
         self.cancelled.append(str(order_id))
+        # Mirror the real API: cancellation flips the order out of the
+        # open statuses, releasing its share reservation.
+        for o in self._orders:
+            if str(getattr(o, "id", "")) == str(order_id):
+                o.status = "OrderStatus.CANCELED"
 
     def get_all_positions(self):
         return getattr(self, "_positions", [])
@@ -520,7 +541,10 @@ def test_management_3_55pm_hard_close():
     assert res["action"] == "hard_close_355pm"
     assert res["close_order_id"] is not None
     assert res["error"] is None
-    # close_position is atomic — server-side cancels related orders and closes.
+    # Resting orders are cancelled BEFORE the close — Alpaca's
+    # close_position does NOT cancel them server-side (live-verified:
+    # it rejects with insufficient-qty while orders hold the shares).
+    assert "stop-NVDA" in client.cancelled
     assert "NVDA" in client.closed_positions
 
 
