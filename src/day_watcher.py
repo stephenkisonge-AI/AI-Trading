@@ -678,9 +678,12 @@ def main() -> int:
     phase = determine_phase(now_et)
     print(f"[day-watcher] phase={phase.name} now_et={now_et.isoformat()}")
     # Kill-switch states, logged every run — first place to look when a
-    # qualified setup didn't execute.
-    print(f"[day-watcher] flags: auto_execute={day_auto_execute_enabled()} "
-          f"shorts_enabled={day_shorts_enabled()}")
+    # qualified setup didn't execute. ON/OFF rather than True/False:
+    # GH Actions masks any log text equal to a secret VALUE, and "True"
+    # collides with ALPACA_PAPER_TRADE's value, printing as ***.
+    print(f"[day-watcher] flags: "
+          f"auto_execute={'ON' if day_auto_execute_enabled() else 'OFF'} "
+          f"shorts_enabled={'ON' if day_shorts_enabled() else 'OFF'}")
 
     if not phase.is_actionable:
         return 0
