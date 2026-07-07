@@ -3,8 +3,15 @@
 **How to use this file:** on the new machine, install Claude Code, open a
 terminal, and paste everything below the line into a fresh Claude Code
 session as your first message. Fill in the one `<PATH-TO-BACKUP-ZIP>`
-placeholder first. Keep the backup zip (`AI-Trading-backup-*.zip`) at hand —
-it contains the secrets and session history that are NOT on GitHub.
+placeholder first. Keep the backup zip (`AI Trading.zip`) at hand — it
+contains the secrets and session history that are NOT on GitHub.
+
+**⚠️ Backup-zip handling rule:** `AI Trading.zip` contains LIVE API secrets
+(`.env`: Alpaca keys, Telegram bot token). It must always exist in at least
+one place OFF the machine running the project (private cloud drive, USB) —
+a backup that only lives on the machine it protects is not a backup. Never
+commit the zip (or `.env`) to the git repo, never share it, and after any
+meaningful change to secrets/memory, regenerate it and re-copy it off-machine.
 
 ---
 
@@ -55,7 +62,9 @@ truth for all code + state calendars).
    and push it.
 
 3. **Restore secrets.** Extract `repo/.env` from the backup zip into the repo
-   root. It is gitignored — confirm `git status` does NOT list it. Never commit it.
+   root. It is gitignored — confirm `git status` does NOT list it, and confirm
+   `.gitignore` still contains `.env` before your first commit on this machine.
+   If it ever shows as tracked/staged, STOP and fix `.gitignore` first.
 
 4. **Python environment.** `python -m venv .venv`, activate, then
    `pip install -r requirements.txt`.
@@ -109,6 +118,15 @@ truth for all code + state calendars).
 
 ## Project rules to carry forward (also in restored memory)
 
+- **NEVER commit live API secrets to GitHub.** No Alpaca keys, Telegram
+  tokens, healthcheck URLs, PATs, `.env` files, or the backup zip may ever
+  appear in a commit, PR, workflow file, log statement, or committed doc —
+  secrets go ONLY in the local `.env` (gitignored) and GitHub Actions
+  **secrets** (`gh secret set`). Before every commit, scan the staged diff
+  for anything that looks like a key or token. If a secret ever reaches a
+  commit — even one that was never pushed — treat it as burned: rotate the
+  Alpaca keys and Telegram token immediately, then rewrite/force-remove the
+  commit.
 - Paper trading only; live is always manual. `ALPACA_PAPER_TRADE=True` is
   load-bearing in both strands' kill switches.
 - Commit + push after every meaningful unit of work.
