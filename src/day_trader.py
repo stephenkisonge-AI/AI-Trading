@@ -97,6 +97,13 @@ _LOSING_STREAK_PAUSE_CAL_DAYS = 7
 # (the free feed) prints wider than NBBO, so 0.10% is the IEX-adjusted
 # equivalent. Quote failures fail OPEN (IEX quote gaps are data quirks).
 _SPREAD_CAP_PCT = 0.001
+# Tape-freshness fallback for wide quotes. IEX top-of-book on non-IEX-
+# listed mega-caps routinely prints multi-dollar-wide artifact quotes
+# (observed: MSFT "1.242%" mid-morning 2026-07-06, killing a valid
+# entry). A wide quote is only trusted as a real no-liquidity signal
+# when the tape is ALSO stale — no IEX trade within this window. Fresh
+# trade + wide quote = quote artifact → gate passes with a stderr log.
+_SPREAD_TRADE_FRESH_SEC = 120
 _FILL_POLL_TIMEOUT_SEC = 30
 _FILL_POLL_INTERVAL_SEC = 1
 
@@ -258,6 +265,27 @@ def _gate_daily_loss(client) -> Optional[SkipDecision]:
     return None
 
 
+def compute_week_pnl_pct(client) -> Optional[float]:
+    """Week-to-date equity change in percent from Alpaca portfolio
+    history (1W window, daily buckets) — the same measurement the weekly
+    loss cap gates on. Returns None when history is unavailable or has
+    fewer than 2 points (fresh account / API hiccup); callers render
+    a placeholder in that case.
+    """
+    try:
+        hist = client.get_portfolio_history(GetPortfolioHistoryRequest(
+            period="1W", timeframe="1D",
+        ))
+        equities = [e for e in (hist.equity or []) if e is not None and e > 0]
+    except Exception as exc:
+        print(f"[day_trader] week P&L: portfolio history failed: {exc}",
+              file=sys.stderr)
+        return None
+    if len(equities) < 2:
+        return None
+    return (equities[-1] - equities[0]) / equities[0] * 100.0
+
+
 def _gate_weekly_loss(client) -> Optional[SkipDecision]:
     """Weekly loss cap — doc §"Risk caps": −4% from week-start equity
     stops new entries until the window rolls. Fail-open on infra errors
@@ -265,7 +293,10 @@ def _gate_weekly_loss(client) -> Optional[SkipDecision]:
     crypto strand's posture.
     """
     try:
-        hist = client.get_portfolio_history(filter=GetPortfolioHistoryRequest(
+        # Positional arg — alpaca-py names this parameter `history_filter`
+        # (NOT `filter` like get_orders); passing `filter=` raises TypeError,
+        # which silently fail-opened this gate on every scan until 2026-07-07.
+        hist = client.get_portfolio_history(GetPortfolioHistoryRequest(
             period="1W", timeframe="1D",
         ))
         equities = [e for e in (hist.equity or []) if e is not None and e > 0]
@@ -326,10 +357,19 @@ def _gate_consecutive_losses(
 
 
 def _gate_spread(symbol: str) -> Optional[SkipDecision]:
-    """Spread cap — skip entries when the IEX top-of-book spread exceeds
-    _SPREAD_CAP_PCT. Fail-open on any fetch problem or degenerate quote:
-    IEX (free feed) legitimately prints empty/zero quotes at quiet
-    moments, and that's a data quirk, not a reason to veto the trade.
+    """Spread cap with a tape-freshness cross-check.
+
+    Tier 1: IEX top-of-book spread ≤ _SPREAD_CAP_PCT → pass.
+    Tier 2: spread is wide, but IEX quotes on this universe (mega-caps,
+        mostly non-IEX-listed) are frequently stale/artifact prints that
+        don't reflect the consolidated market. A wide quote is only
+        treated as a real liquidity problem when the tape agrees: no IEX
+        trade within _SPREAD_TRADE_FRESH_SEC. Fresh trade → the market
+        is demonstrably active → pass with a stderr log.
+
+    Fail-open on any fetch problem or degenerate quote: IEX (free feed)
+    legitimately prints empty/zero quotes at quiet moments, and that's a
+    data quirk, not a reason to veto the trade.
     """
     try:
         from src.day_data import get_stock_latest_quote
@@ -344,12 +384,36 @@ def _gate_spread(symbol: str) -> Optional[SkipDecision]:
         return None
     mid = (ask + bid) / 2.0
     spread_pct = (ask - bid) / mid
-    if spread_pct > _SPREAD_CAP_PCT:
-        return SkipDecision(
-            False,
-            f"spread_{spread_pct * 100:.3f}pct_exceeds_{_SPREAD_CAP_PCT * 100:.2f}pct_cap",
-        )
-    return None
+    if spread_pct <= _SPREAD_CAP_PCT:
+        return None
+
+    # Wide quote — cross-check against the tape before skipping.
+    try:
+        from src.day_data import get_stock_latest_trade
+        trade = get_stock_latest_trade(symbol)
+        trade_ts = getattr(trade, "timestamp", None)
+    except Exception as exc:
+        print(f"[day_trader] spread gate: trade fetch failed for {symbol}: {exc}",
+              file=sys.stderr)
+        trade_ts = None
+    if trade_ts is not None:
+        if trade_ts.tzinfo is None:
+            trade_ts = trade_ts.replace(tzinfo=timezone.utc)
+        age_sec = (datetime.now(timezone.utc) - trade_ts).total_seconds()
+        if age_sec <= _SPREAD_TRADE_FRESH_SEC:
+            print(
+                f"[day_trader] spread gate: {symbol} quote spread "
+                f"{spread_pct * 100:.3f}% exceeds cap but tape is fresh "
+                f"(last trade {age_sec:.0f}s ago) — treating as IEX quote "
+                f"artifact, gate passes",
+                file=sys.stderr,
+            )
+            return None
+    return SkipDecision(
+        False,
+        f"spread_{spread_pct * 100:.3f}pct_exceeds_"
+        f"{_SPREAD_CAP_PCT * 100:.2f}pct_cap_and_tape_stale",
+    )
 
 
 def _gate_expectancy_warning(lifecycle_stats: dict | None) -> Optional[SkipDecision]:

@@ -5,10 +5,11 @@ account. Each strand must only count and manage its OWN symbols — these
 tests pin that boundary from the crypto side (the day side's mirror
 tests live in tests/test_day_trader.py).
 """
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.trader import _gate_daily_entry_cap, manage_open_positions
+from src.trader import _gate_daily_entry_cap, manage_open_positions, summarize_lifecycle
 
 
 class _OrdersClient:
@@ -42,6 +43,35 @@ def test_daily_entry_cap_trips_on_crypto_buy_no_slash_form():
     decision = _gate_daily_entry_cap(client)
     assert decision is not None
     assert decision.allowed is False
+
+
+def _closed_order(symbol, side, qty, price, ts):
+    return SimpleNamespace(
+        symbol=symbol, side=f"OrderSide.{side}", order_type="OrderType.MARKET",
+        filled_qty=str(qty), filled_avg_price=str(price), stop_price=None,
+        filled_at=ts, submitted_at=ts, created_at=ts,
+    )
+
+
+def test_lifecycle_excludes_day_trade_equity_orders(monkeypatch):
+    # Before the symbol filter, summarize_lifecycle reconstructed the day
+    # strand's NFLX round-trip as a crypto trade — the crypto STAND DOWN
+    # alert then reported the day strand's P&L/R stats as its own
+    # (observed 2026-07-07: near-identical stats in both strands' alerts).
+    monkeypatch.setenv("WATCHER_AUTO_EXECUTE", "true")
+    monkeypatch.setenv("ALPACA_PAPER_TRADE", "True")
+    t1 = datetime(2026, 7, 6, 15, 11, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 6, 15, 45, tzinfo=timezone.utc)
+    orders = [
+        _closed_order("NFLX", "BUY", 392, 76.64, t1),
+        _closed_order("NFLX", "SELL", 392, 76.28, t2),
+        _closed_order("BTC/USD", "BUY", 0.005, 100_000.0, t1),
+        _closed_order("BTC/USD", "SELL", 0.005, 101_000.0, t2),
+    ]
+    with patch("src.trader.get_client", return_value=_OrdersClient(orders)):
+        stats = summarize_lifecycle()
+    assert stats["total_closed"] == 1
+    assert stats["total_pl_usd"] == 5.0  # 0.005 × (101000 − 100000); no NFLX
 
 
 def test_crypto_management_skips_equity_positions(monkeypatch):

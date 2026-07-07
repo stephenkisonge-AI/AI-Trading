@@ -47,6 +47,7 @@ from src.day_strategy import (
 )
 from src.day_trader import (
     check_pre_execution_gates,
+    compute_week_pnl_pct,
     day_auto_execute_enabled,
     day_shorts_enabled,
     manage_open_positions,
@@ -283,10 +284,12 @@ def run_pre_session(now_et: datetime) -> dict:
 
     # Account snapshot for the alert body.
     equity = 0.0
+    week_pnl_pct = 0.0
     try:
         client = get_client()
         account = client.get_account()
         equity = float(account.equity)
+        week_pnl_pct = compute_week_pnl_pct(client) or 0.0
     except Exception:
         # Best-effort — pre-session alert still fires even without account.
         pass
@@ -299,7 +302,7 @@ def run_pre_session(now_et: datetime) -> dict:
     msg = format_pre_session_summary(
         now_et=now_et.astimezone(ET),
         equity=equity,
-        week_pnl_pct=0.0,  # plumbing for D4 lifecycle stats
+        week_pnl_pct=week_pnl_pct,
         daily_regime=regime,
         intraday_character=None,
         eligible=eligible,

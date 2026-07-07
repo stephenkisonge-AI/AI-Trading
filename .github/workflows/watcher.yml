@@ -23,6 +23,12 @@ permissions:
   contents: read
   actions: read   # fallback guard needs to query workflow runs
 
+# Serialize scans (same rationale as day-watcher.yml): overlapping runs
+# could each pass the max-positions gate before the other's fill lands.
+concurrency:
+  group: crypto-watcher-scan
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest

@@ -214,9 +214,12 @@ def _gate_daily_entry_cap(client) -> Optional[SkipDecision]:
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
+    # limit=500 — the SDK default (50) can truncate on a busy day-trade
+    # session (same account), hiding an earlier crypto BUY from this cap.
     recent = client.get_orders(filter=GetOrdersRequest(
         status=QueryOrderStatus.CLOSED,
         after=today_start,
+        limit=500,
     ))
     for o in recent:
         # The day-trade strand shares this paper account — its equity BUYs
@@ -255,7 +258,10 @@ def _gate_spread(symbol: str) -> Optional[SkipDecision]:
 
 def _gate_weekly_loss_cap(client) -> Optional[SkipDecision]:
     try:
-        hist = client.get_portfolio_history(filter=GetPortfolioHistoryRequest(
+        # Positional arg — alpaca-py names this parameter `history_filter`
+        # (NOT `filter` like get_orders); passing `filter=` raises TypeError,
+        # which silently fail-opened this gate on every scan until 2026-07-07.
+        hist = client.get_portfolio_history(GetPortfolioHistoryRequest(
             period="1W", timeframe="1D"
         ))
         equities = [e for e in (hist.equity or []) if e is not None and e > 0]
@@ -276,7 +282,8 @@ def _gate_weekly_loss_cap(client) -> Optional[SkipDecision]:
 
 def _gate_rolling_drawdown(client) -> Optional[SkipDecision]:
     try:
-        hist = client.get_portfolio_history(filter=GetPortfolioHistoryRequest(
+        # Positional — same `history_filter` kwarg trap as the weekly gate.
+        hist = client.get_portfolio_history(GetPortfolioHistoryRequest(
             period="1M", timeframe="1D"
         ))
         equities = [e for e in (hist.equity or []) if e is not None and e > 0]
@@ -917,8 +924,13 @@ def summarize_lifecycle(days_back: int = _LIFECYCLE_LOOKBACK_DAYS) -> dict:
     by_symbol: dict[str, list] = {}
     for o in closed_orders:
         sym = getattr(o, "symbol", None)
-        if sym:
-            by_symbol.setdefault(sym, []).append(o)
+        # The day-trade strand shares this paper account — its equity
+        # orders (NFLX, MSFT, ...) must not be reconstructed as crypto
+        # trades. Before this filter, the crypto scan summary reported
+        # the day strand's closed trades as its own.
+        if not sym or sym.replace("/", "") not in CRYPTO_SYMBOLS_NO_SLASH:
+            continue
+        by_symbol.setdefault(sym, []).append(o)
 
     def _ts(o):
         return (

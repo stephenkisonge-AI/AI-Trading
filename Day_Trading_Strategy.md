@@ -385,10 +385,15 @@ must be working hard or it's not earning its keep intraday.
   - Daily regime is choppy — or bearish for LONGS / non-bearish for
     SHORTS (each direction trades only its own regime).
   - Overnight gap > 4% on the candidate.
-  - Bid/ask spread > 0.10% on the candidate (IEX top-of-book; the
-    original 0.05% was calibrated to consolidated NBBO, which the free
-    feed doesn't carry). Quote-fetch failures fail OPEN — IEX quote
-    gaps are a data quirk, not a trade veto.
+  - Bid/ask spread > 0.10% on the candidate **and** the tape is stale
+    (no IEX trade in the last 120s). IEX top-of-book quotes on
+    non-IEX-listed mega-caps are frequently multi-dollar-wide artifacts
+    (observed: MSFT printing "1.242%" mid-morning 2026-07-06 while the
+    real NBBO was pennies) — a wide quote alone is not evidence of an
+    illiquid market, but a wide quote with a dead tape is. The original
+    0.05% was calibrated to consolidated NBBO, which the free feed
+    doesn't carry. Quote-fetch failures fail OPEN — IEX quote gaps are
+    a data quirk, not a trade veto.
   - Earnings today or yesterday (stocks only).
   - Within 30 minutes of FOMC / CPI / PCE / NFP / GDP release per
     `state/econ_events.json`.

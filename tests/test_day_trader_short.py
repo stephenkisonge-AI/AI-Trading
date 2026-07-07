@@ -4,7 +4,7 @@ reconstruction for SHORT trades.
 
 Reuses the fakes from tests/test_day_trader.py.
 """
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -350,7 +350,11 @@ class _PortfolioHistoryClient:
     def __init__(self, equities):
         self._equities = equities
 
-    def get_portfolio_history(self, filter=None):
+    # Mirrors the real alpaca-py signature: the parameter is named
+    # `history_filter`, NOT `filter` like get_orders. The production bug
+    # this pins down: calling with filter= raised TypeError on every scan
+    # and silently fail-opened the weekly-loss/drawdown gates.
+    def get_portfolio_history(self, history_filter=None):
         return SimpleNamespace(equity=self._equities)
 
 
@@ -426,12 +430,50 @@ def test_cooldown_fails_open_without_stats():
     assert _gate_consecutive_losses({"error": "boom"}, now_et=_now_et_fixed()) is None
 
 
-def test_spread_gate_blocks_wide_spread(monkeypatch):
+def _wide_quote(monkeypatch):
     import src.day_data as day_data_mod
     monkeypatch.setattr(
         day_data_mod, "get_stock_latest_quote",
         lambda s: SimpleNamespace(bid_price=100.0, ask_price=100.5),
     )
+    return day_data_mod
+
+
+def test_spread_gate_blocks_wide_spread_with_stale_tape(monkeypatch):
+    day_data_mod = _wide_quote(monkeypatch)
+    stale_ts = datetime.now(timezone.utc) - timedelta(minutes=10)
+    monkeypatch.setattr(
+        day_data_mod, "get_stock_latest_trade",
+        lambda s: SimpleNamespace(timestamp=stale_ts, price=100.2),
+    )
+    decision = _gate_spread("NVDA")
+    assert decision is not None
+    assert decision.allowed is False
+    assert "tape_stale" in decision.reason
+
+
+def test_spread_gate_passes_wide_spread_with_fresh_tape(monkeypatch):
+    # The MSFT 2026-07-06 case: IEX prints an artifact multi-dollar-wide
+    # quote on an ultra-liquid name while trades keep printing. A fresh
+    # tape proves the market is alive — the wide quote is not trusted.
+    day_data_mod = _wide_quote(monkeypatch)
+    fresh_ts = datetime.now(timezone.utc) - timedelta(seconds=5)
+    monkeypatch.setattr(
+        day_data_mod, "get_stock_latest_trade",
+        lambda s: SimpleNamespace(timestamp=fresh_ts, price=100.2),
+    )
+    assert _gate_spread("MSFT") is None
+
+
+def test_spread_gate_blocks_wide_spread_when_trade_fetch_fails(monkeypatch):
+    # Wide quote + unknown tape → fail toward skipping (the quote is the
+    # only evidence we have, and it says the market is wide).
+    day_data_mod = _wide_quote(monkeypatch)
+
+    def _boom(s):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(day_data_mod, "get_stock_latest_trade", _boom)
     decision = _gate_spread("NVDA")
     assert decision is not None
     assert decision.allowed is False
@@ -453,3 +495,12 @@ def test_spread_gate_fails_open_on_zero_quote(monkeypatch):
         lambda s: SimpleNamespace(bid_price=0.0, ask_price=100.0),
     )
     assert _gate_spread("NVDA") is None
+
+
+def test_compute_week_pnl_pct():
+    from src.day_trader import compute_week_pnl_pct
+    assert compute_week_pnl_pct(
+        _PortfolioHistoryClient([100_000, 102_000])
+    ) == pytest.approx(2.0)
+    assert compute_week_pnl_pct(_PortfolioHistoryClient([100_000])) is None
+    assert compute_week_pnl_pct(FakeClient()) is None  # no history attr

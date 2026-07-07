@@ -20,7 +20,11 @@ from typing import Optional
 import pandas as pd
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
+from alpaca.data.requests import (
+    StockBarsRequest,
+    StockLatestQuoteRequest,
+    StockLatestTradeRequest,
+)
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from src.data import _require_env
@@ -103,6 +107,23 @@ def get_stock_latest_quote(symbol: str):
     if symbol not in quotes:
         raise RuntimeError(f"No quote returned for {symbol}")
     return quotes[symbol]
+
+
+def get_stock_latest_trade(symbol: str):
+    """Latest trade for `symbol` from the IEX feed. Used by the spread
+    gate as a tape-freshness cross-check: IEX top-of-book quotes on
+    non-IEX-listed mega-caps are frequently multi-dollar-wide artifacts,
+    but IEX *trades* print at real market prices — a fresh trade means
+    the market is alive even when the quote looks degenerate.
+    Raises on API failure (caller decides fail-open vs fail-closed).
+    """
+    client = _get_stock_data_client()
+    trades = client.get_stock_latest_trade(StockLatestTradeRequest(
+        symbol_or_symbols=symbol, feed=DataFeed.IEX,
+    ))
+    if symbol not in trades:
+        raise RuntimeError(f"No latest trade returned for {symbol}")
+    return trades[symbol]
 
 
 def get_pre_market_high_low(

@@ -25,6 +25,16 @@ on:
 permissions:
   contents: read
 
+# Serialize scans — a delayed external-cron tick can land seconds before
+# the next on-time one (observed 34s apart on 2026-07-06). Two CONCURRENT
+# scans both pass the no-position gate before either fill lands, which is
+# the recipe for a double entry. Queued (not cancelled) so a management
+# pass is never skipped; the queued run's entry gates then see the fresh
+# position and skip correctly.
+concurrency:
+  group: day-watcher-scan
+  cancel-in-progress: false
+
 jobs:
   scan:
     runs-on: ubuntu-latest
