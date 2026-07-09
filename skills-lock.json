@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "backtest": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/backtest/SKILL.md",
+      "computedHash": "07abd1f1c30ba05cdc02215794999922f20100dcdc16e207e4e0142e8077b57a"
+    },
+    "optimize": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/optimize/SKILL.md",
+      "computedHash": "bd99760482ef212293983912ab4a1a7542fad09b92269e611d2b296312dc9838"
+    },
+    "quick-stats": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/quick-stats/SKILL.md",
+      "computedHash": "96a47db6da069161cd6aae6ca97c5d02130ca86f464c864af15614bb4bc0950f"
+    },
+    "setup": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/setup/SKILL.md",
+      "computedHash": "b75f56ea2f8c0adc7f1d9e13f373792bbe6cea5a6849526e92d12415e0a31c41"
+    },
+    "strategy-compare": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/strategy-compare/SKILL.md",
+      "computedHash": "37719975e8ab7c0e7548b5213fd3101ed312bfae8f25fffd354dd9829a8cfe31"
+    },
+    "vectorbt-expert": {
+      "source": "marketcalls/vectorbt-backtesting-skills",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/vectorbt-expert/SKILL.md",
+      "computedHash": "6d6419bdff8eee1a1e9fc78f8b3b0f089e0cbc6af009e2d42f6fbe727dc7279a"
+    }
+  }
+}
