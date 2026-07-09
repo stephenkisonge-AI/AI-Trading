@@ -1,23 +1,32 @@
-# AI-Trading — Disaster-Recovery Restore Prompt
+# AI-Trading — Restore Prompt (this machine, workspace `C:\Users\StephenAI\AI Trading`)
 
-**How to use this file:** on the new machine, install Claude Code, open a
-terminal, and paste everything below the line into a fresh Claude Code
-session as your first message. Fill in the one `<PATH-TO-BACKUP-ZIP>`
-placeholder first. Keep the backup zip (`AI Trading.zip`) at hand — it
-contains the secrets and session history that are NOT on GitHub.
+**How to use this file:** open a Claude Code session in the trusted workspace
+folder `C:\Users\StephenAI\AI Trading` and paste everything below the line as
+your first message. The backup zip is **`AI Trading.zip` at
+`C:\Users\StephenAI\AI Trading.zip`**. Its contents were extracted and
+arranged into place on 2026-07-09: the workspace root IS the git repo root,
+and the Claude memory/transcripts were installed into
+`~\.claude\projects\C--Users-StephenAI-AI-Trading\`. Steps 2 and 6 below are
+therefore verify-or-do: verify first, and only re-extract from the zip if
+something is missing.
 
 **⚠️ Backup-zip handling rule:** `AI Trading.zip` contains LIVE API secrets
 (`.env`: Alpaca keys, Telegram bot token). It must always exist in at least
 one place OFF the machine running the project (private cloud drive, USB) —
-a backup that only lives on the machine it protects is not a backup. Never
+a backup that only lives on the machine it protects is not a backup. The copy
+at `C:\Users\StephenAI\AI Trading.zip` is ON this machine, so once the restore
+succeeds, confirm an off-machine copy still exists (or make one). Never
 commit the zip (or `.env`) to the git repo, never share it, and after any
 meaningful change to secrets/memory, regenerate it and re-copy it off-machine.
 
 ---
 
-Restore my AI-Trading project on this machine. Work through every step,
-verify as you go, and tell me exactly what you need from me when a step
-needs my interactive input. My backup zip is at: `<PATH-TO-BACKUP-ZIP>`
+Restore my AI-Trading project into this workspace:
+`C:\Users\StephenAI\AI Trading` (already the trusted Claude Code folder, and
+already the git repo root — the backup zip at
+`C:\Users\StephenAI\AI Trading.zip` was extracted and arranged on 2026-07-09).
+Work through every step, verify as you go, and tell me exactly what you need
+from me when a step needs my interactive input.
 
 ## What this project is
 
@@ -38,33 +47,42 @@ truth for all code + state calendars).
 
 ## Where everything lives
 
-| Data | Location | In backup zip? |
+| Data | Location | Restored on this machine? |
 |---|---|---|
-| Code, workflows, strategy docs, state calendars | GitHub repo | yes (`repo/`, incl. `.git`) |
-| Local secrets (`.env`: Alpaca keys, paper flag, Telegram token+chat) | local only | **yes — zip is the only copy** |
+| Code, workflows, strategy docs, state calendars | GitHub repo | yes — workspace root is the repo checkout (incl. `.git`), may be stale vs GitHub |
+| Local secrets (`.env`: Alpaca keys, paper flag, Telegram token+chat) | local only | **yes — `.env` at workspace root; the zip is the only other copy** |
 | GitHub Actions secrets (see list below) | GitHub repo settings | no — survive with the repo |
-| Claude Code memory + session transcripts | `~/.claude/projects/<slug>/` | yes (`claude-project/`) |
+| Claude Code memory + session transcripts | `~\.claude\projects\C--Users-StephenAI-AI-Trading\` | yes — installed 2026-07-09 |
 | External cron (cron-job.org) + healthchecks.io | external services | no — config documented below |
 
 ## Restore steps (do these in order)
 
 1. **Prerequisites.** Check `git`, `gh`, and Python 3.11+ are installed
-   (`winget install Git.Git GitHub.cli Python.Python.3.11` on Windows if not).
+   (`winget install Git.Git GitHub.cli Python.Python.3.11` if not).
    Then have me authenticate GitHub by telling me to type:
    `! gh auth login` (choose GitHub.com → HTTPS → login via browser with
    stephenkisongeai@gmail.com). Verify with `gh auth status`.
 
-2. **Clone the repo** into a folder named `AI Trading` (space included) under
-   my home directory:
-   `gh repo clone stephenkisonge-AI/AI-Trading "AI Trading"` — then `cd` into it.
-   If GitHub is somehow gone too, extract `repo/` from the backup zip instead —
-   it contains the full working tree AND `.git` history; re-create a GitHub repo
-   and push it.
+2. **Verify the workspace root is the repo root** (already arranged
+   2026-07-09). The layout must be: `C:\Users\StephenAI\AI Trading` IS the
+   git repo root — the Claude Code project slug
+   `C--Users-StephenAI-AI-Trading` is derived from this exact path, so the
+   repo must never be nested in a subfolder. Verify with `git status` that
+   the workspace root is a valid checkout on `master`. If it is NOT (fresh
+   disaster), extract `repo\` from the backup zip and move its CONTENTS
+   (including the hidden `.git`, plus `.env`, `.github`, `.claude`,
+   `.gitignore`) up into `C:\Users\StephenAI\AI Trading\`.
+   Then sync with GitHub, which is the source of truth (the zip snapshot may
+   be stale): `git fetch origin` and fast-forward `git pull` if behind. Only
+   if the GitHub repo is gone: the local `.git` contains full history —
+   re-create the repo on GitHub and push.
 
-3. **Restore secrets.** Extract `repo/.env` from the backup zip into the repo
-   root. It is gitignored — confirm `git status` does NOT list it, and confirm
-   `.gitignore` still contains `.env` before your first commit on this machine.
-   If it ever shows as tracked/staged, STOP and fix `.gitignore` first.
+3. **Verify secrets.** `.env` must sit at the workspace root (already there;
+   if missing, re-extract `repo/.env` from
+   `C:\Users\StephenAI\AI Trading.zip`). It is gitignored — confirm
+   `git status` does NOT list it, and confirm `.gitignore` still contains
+   `.env` before your first commit on this machine. If it ever shows as
+   tracked/staged, STOP and fix `.gitignore` first.
 
 4. **Python environment.** `python -m venv .venv`, activate, then
    `pip install -r requirements.txt`.
@@ -74,13 +92,16 @@ truth for all code + state calendars).
    load `.env`, call `src.data.get_client().get_account()` and print equity —
    proves the Alpaca paper keys still work.
 
-6. **Restore Claude Code memory + sessions.** Launch `claude` once inside the
-   repo folder and exit — this creates `~/.claude/projects/<new-slug>/` (slug is
-   derived from the folder path, so it will differ from the old machine's
-   `C--Users-StephenAI-AI-Trading`). Then copy the CONTENTS of the zip's
-   `claude-project/` folder (memory/ + *.jsonl transcripts + MEMORY.md index)
-   into that new slug directory. Memory loads next session; `claude --resume`
-   lists the old transcripts.
+6. **Verify Claude Code memory + sessions** (already installed 2026-07-09).
+   The project slug directory
+   `C:\Users\StephenAI\.claude\projects\C--Users-StephenAI-AI-Trading\`
+   must contain `memory\MEMORY.md` (plus the other memory files) and the
+   restored `*.jsonl` transcripts — `claude --resume` should list the old
+   sessions. If missing (fresh disaster), extract `claude-project\` from the
+   backup zip and copy its CONTENTS into that slug directory — do not
+   overwrite this session's own newer files if names collide — then delete
+   the extracted folder: it must never sit inside the git working tree,
+   because the transcripts must never be committed.
 
 7. **Verify GitHub Actions infrastructure.** Run `gh secret list` — these 9
    must exist (values for the first 5 are in the restored `.env`; the last 4
