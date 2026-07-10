@@ -36,3 +36,8 @@ new_regime_output.txt
 # of the broad state/*.json ignore above.
 !state/earnings.json
 !state/econ_events.json
+
+# Local clone of the PRIVATE state repository (AI-Trading-State).
+# The authoritative journal lives there, never in this public repo.
+state/journal-repo/
+state/journal/
