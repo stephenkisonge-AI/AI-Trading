@@ -5,9 +5,12 @@ Deployment Option B: the authoritative copy lives in a separate PRIVATE
 GitHub repository (AI-Trading-State), synced via `GitJournal`. Trading
 code talks only to this abstraction — never to SQLite or git directly.
 
-Files inside the journal root:
-    events.jsonl   — append-only, one JSON event per line
-    snapshot.json  — compact materialized state, rewritten on each append
+Files inside the journal root, scoped PER STRAND so one strand's
+entry-freeze/risk state can never gate the other (both strands share
+one Alpaca paper account but are otherwise independent):
+    <strand>/events.jsonl   — append-only, one JSON event per line
+    <strand>/snapshot.json  — compact materialized state, rewritten on
+                              each append
 
 Event shape:
     {
@@ -159,9 +162,12 @@ class Journal:
     def __init__(self, root: Path | str, strand: str = "swing"):
         self.root = Path(root)
         self.strand = strand
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.events_path = self.root / "events.jsonl"
-        self.snapshot_path = self.root / "snapshot.json"
+        # Per-strand subtree: freeze events, trades, and snapshots for
+        # one strand are invisible to the other's journal instance.
+        strand_dir = self.root / strand
+        strand_dir.mkdir(parents=True, exist_ok=True)
+        self.events_path = strand_dir / "events.jsonl"
+        self.snapshot_path = strand_dir / "snapshot.json"
 
     # -- core ----------------------------------------------------------------
 
@@ -489,18 +495,22 @@ class GitJournal(Journal):
         return False
 
 
-def journal_from_env() -> Optional[Journal]:
+def journal_from_env(strand: str = "swing") -> Optional[Journal]:
     """Build the journal from environment configuration.
 
     STATE_REPO_DIR — path to a clone of the private state repo (GitJournal).
     JOURNAL_DIR    — plain file journal (local testing only).
     Neither set    — returns None; callers must treat that as
                      "journal unavailable" and freeze new entries.
+
+    Both strands share the same state repo clone; the strand argument
+    selects the per-strand subtree so their freeze/risk state stays
+    independent.
     """
     state_repo_dir = os.environ.get("STATE_REPO_DIR")
     if state_repo_dir:
-        return GitJournal(state_repo_dir)
+        return GitJournal(state_repo_dir, strand=strand)
     journal_dir = os.environ.get("JOURNAL_DIR")
     if journal_dir:
-        return Journal(journal_dir)
+        return Journal(journal_dir, strand=strand)
     return None

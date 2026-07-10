@@ -415,6 +415,9 @@ def evaluate_setup_a(
         "entry": None,
         "stop": None,
         "atr": None,
+        # Closed 4H signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": h4_df.index[-1] if len(h4_df) else None,
     }
     if qualified:
         result["entry"] = h4_close
@@ -542,6 +545,9 @@ def evaluate_setup_b(
         "entry": None,
         "stop": None,
         "atr": None,
+        # Closed 4H signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": h4_df.index[-1] if len(h4_df) else None,
     }
     if qualified:
         result["entry"] = h4_close
