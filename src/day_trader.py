@@ -65,6 +65,14 @@ from alpaca.trading.requests import (
 )
 
 from src.data import get_client
+from src.execution import (
+    make_client_order_id,
+    order_avg_price,
+    order_filled_qty,
+    order_status_str,
+    wait_for_terminal,
+    TERMINAL_ORDER_STATUSES,
+)
 
 
 # --- Tunables (keep in sync with Day_Trading_Strategy.md) ----------------
@@ -134,14 +142,28 @@ _EXPECTANCY_MIN_R = 0.2
 # Day-trade sample threshold — doc says "at least 50 closed day trades"
 # (vs swing's 30) because per-trade edge is smaller intraday.
 _MIN_SAMPLE_FOR_EXPECTANCY = 50
-# client_order_id prefix used to tag entry BUYs with setup type — parsed
-# back out during lifecycle reconstruction.
+# client_order_id prefixes. Legacy entries were tagged
+# DAY-{setup}-{SYMBOL}-{epoch} with a wall-clock epoch (still present in
+# Alpaca order history, so parsers accept it). New orders use the
+# canonical Phase 2 deterministic scheme with the "day" strand prefix:
+# day-{SYMBOL}-{setup}-{signal_bar_ts}-{action}-{leg} — the same logical
+# action always mints the same ID, so two racing workflow runs cannot
+# double-enter (Alpaca rejects the duplicate client order id).
 _CLIENT_ORDER_ID_PREFIX = "DAY"
+_CANONICAL_PREFIX = "day"
 # Env var that lets the user override the expectancy circuit breaker.
 # When the lifecycle expectancy_warning fires, new entries are refused
 # unless this is set to "true". Existing positions are still managed
 # normally. Doc: Day_Trading_Strategy.md §"Reminder to myself".
 _OVERRIDE_EXPECTANCY_ENV_VAR = "WATCHER_DAY_OVERRIDE_EXPECTANCY"
+# Actual (fill-based) risk may exceed the approved (signal-priced) risk
+# by at most this fraction before the freshly-filled position is
+# flattened (Phase 2 pattern — sizing itself still uses the signal
+# price; this bounds what slippage can do to realized risk).
+_ACTUAL_RISK_TOLERANCE = 0.10
+# How long to wait for a confirmed terminal state when cancelling an
+# entry after a fill timeout.
+_CANCEL_CONFIRM_TIMEOUT_SEC = 30
 # -------------------------------------------------------------------------
 
 from src.universe import UNIVERSE  # single source of truth — edit src/universe.py
@@ -236,10 +258,17 @@ def _count_today_entries(client) -> int:
     return sum(
         1 for o in orders
         if getattr(o, "filled_at", None) is not None
-        and str(getattr(o, "client_order_id", "") or "").startswith(
-            _CLIENT_ORDER_ID_PREFIX + "-"
-        )
+        and _is_day_entry_coid(str(getattr(o, "client_order_id", "") or ""))
     )
+
+
+def _is_day_entry_coid(coid: str) -> bool:
+    """True when the client_order_id tags a day-strand ENTRY order —
+    legacy DAY-... form (only entries were tagged) or canonical
+    day-...-entry-N form (exits carry -tp1-/-tp2-/-stop-/-close-)."""
+    if coid.startswith(_CLIENT_ORDER_ID_PREFIX + "-"):
+        return True
+    return coid.startswith(_CANONICAL_PREFIX + "-") and "-entry-" in coid
 
 
 def _gate_daily_loss(client) -> Optional[SkipDecision]:
@@ -288,9 +317,9 @@ def compute_week_pnl_pct(client) -> Optional[float]:
 
 def _gate_weekly_loss(client) -> Optional[SkipDecision]:
     """Weekly loss cap — doc §"Risk caps": −4% from week-start equity
-    stops new entries until the window rolls. Fail-open on infra errors
-    (portfolio history unavailable ≠ strategy violation), matching the
-    crypto strand's posture.
+    stops new entries until the window rolls. FAIL CLOSED on infra
+    errors (Phase 4 pattern): if the loss cap can't be measured, the
+    cap can't be trusted — block new entries, keep managing positions.
     """
     try:
         # Positional arg — alpaca-py names this parameter `history_filter`
@@ -301,9 +330,9 @@ def _gate_weekly_loss(client) -> Optional[SkipDecision]:
         ))
         equities = [e for e in (hist.equity or []) if e is not None and e > 0]
     except Exception as exc:
-        print(f"[day_trader] weekly cap: portfolio history failed: {exc}",
-              file=sys.stderr)
-        return None
+        return SkipDecision(
+            False,
+            f"weekly_cap_data_unavailable_new_entries_frozen: {exc}")
     if len(equities) < 2:
         return None
     weekly_pl = (equities[-1] - equities[0]) / equities[0]
@@ -367,27 +396,35 @@ def _gate_spread(symbol: str) -> Optional[SkipDecision]:
         trade within _SPREAD_TRADE_FRESH_SEC. Fresh trade → the market
         is demonstrably active → pass with a stderr log.
 
-    Fail-open on any fetch problem or degenerate quote: IEX (free feed)
-    legitimately prints empty/zero quotes at quiet moments, and that's a
-    data quirk, not a reason to veto the trade.
+    FAIL CLOSED on fetch problems and degenerate quotes (Phase 4
+    pattern) — with the documented IEX carve-out: the free IEX feed
+    legitimately prints empty/zero/stale quotes on this mostly
+    non-IEX-listed universe, so an unusable QUOTE alone doesn't veto
+    the trade when the TAPE proves the market is active (fresh trade
+    within _SPREAD_TRADE_FRESH_SEC). No fresh tape either → blocked.
     """
+    quote_usable = False
+    bid = ask = 0.0
     try:
         from src.day_data import get_stock_latest_quote
         quote = get_stock_latest_quote(symbol)
         bid = float(getattr(quote, "bid_price", 0) or 0)
         ask = float(getattr(quote, "ask_price", 0) or 0)
+        quote_usable = bid > 0 and ask > 0 and ask >= bid
     except Exception as exc:
         print(f"[day_trader] spread gate: quote fetch failed for {symbol}: {exc}",
               file=sys.stderr)
-        return None
-    if bid <= 0 or ask <= 0 or ask < bid:
-        return None
-    mid = (ask + bid) / 2.0
-    spread_pct = (ask - bid) / mid
-    if spread_pct <= _SPREAD_CAP_PCT:
-        return None
+    if quote_usable:
+        mid = (ask + bid) / 2.0
+        spread_pct = (ask - bid) / mid
+        if spread_pct <= _SPREAD_CAP_PCT:
+            return None
+    else:
+        spread_pct = None  # unusable quote — tape cross-check decides
 
-    # Wide quote — cross-check against the tape before skipping.
+    # Wide or unusable quote — cross-check against the tape before
+    # deciding. A fresh trade = demonstrably active market (pass);
+    # anything else fails closed.
     try:
         from src.day_data import get_stock_latest_trade
         trade = get_stock_latest_trade(symbol)
@@ -396,23 +433,28 @@ def _gate_spread(symbol: str) -> Optional[SkipDecision]:
         print(f"[day_trader] spread gate: trade fetch failed for {symbol}: {exc}",
               file=sys.stderr)
         trade_ts = None
+    quote_desc = (f"spread {spread_pct * 100:.3f}%" if spread_pct is not None
+                  else "quote unusable")
     if trade_ts is not None:
         if trade_ts.tzinfo is None:
             trade_ts = trade_ts.replace(tzinfo=timezone.utc)
         age_sec = (datetime.now(timezone.utc) - trade_ts).total_seconds()
         if age_sec <= _SPREAD_TRADE_FRESH_SEC:
             print(
-                f"[day_trader] spread gate: {symbol} quote spread "
-                f"{spread_pct * 100:.3f}% exceeds cap but tape is fresh "
-                f"(last trade {age_sec:.0f}s ago) — treating as IEX quote "
-                f"artifact, gate passes",
+                f"[day_trader] spread gate: {symbol} {quote_desc} but tape "
+                f"is fresh (last trade {age_sec:.0f}s ago) — treating as "
+                f"IEX quote artifact, gate passes",
                 file=sys.stderr,
             )
             return None
+    if spread_pct is not None:
+        return SkipDecision(
+            False,
+            f"spread_{spread_pct * 100:.3f}pct_exceeds_"
+            f"{_SPREAD_CAP_PCT * 100:.2f}pct_cap_and_tape_stale",
+        )
     return SkipDecision(
-        False,
-        f"spread_{spread_pct * 100:.3f}pct_exceeds_"
-        f"{_SPREAD_CAP_PCT * 100:.2f}pct_cap_and_tape_stale",
+        False, "quote_data_unavailable_and_tape_stale_new_entries_frozen",
     )
 
 
@@ -479,6 +521,16 @@ def check_pre_execution_gates(
             False,
             "shorts_disabled (set WATCHER_DAY_ENABLE_SHORTS=true to enable)",
         )
+
+    # Lifecycle stats power the expectancy breaker AND the loss
+    # cooldowns. If the scan computed them and the computation errored,
+    # those two risk gates are blind — fail closed (Phase 4 pattern).
+    # None means the caller deliberately bypassed them (tests).
+    if lifecycle_stats is not None and lifecycle_stats.get("error"):
+        return SkipDecision(
+            False,
+            f"lifecycle_stats_unavailable_new_entries_frozen: "
+            f"{lifecycle_stats['error']}")
 
     # Expectancy circuit breaker — checked before any Alpaca calls so the
     # rejection path stays cheap. lifecycle_stats was already computed
@@ -569,6 +621,83 @@ def _wait_for_fill(client, order_id, timeout_sec: int = _FILL_POLL_TIMEOUT_SEC):
     raise TimeoutError(f"order {order_id} not filled within {timeout_sec}s")
 
 
+def _flatten_position(client, symbol: str, exit_side, qty: int) -> dict:
+    """Market-close exactly `qty` shares and poll the fill. Used when a
+    freshly-created position cannot be safely protected (excess actual
+    risk, incomplete OCO coverage, timeout partial)."""
+    out: dict = {"submitted": False, "filled_qty": 0.0, "avg_price": None,
+                 "error": None}
+    try:
+        close_order = client.submit_order(MarketOrderRequest(
+            symbol=symbol, qty=qty, side=exit_side,
+            time_in_force=TimeInForce.DAY,
+        ))
+        out["submitted"] = True
+    except Exception as exc:
+        out["error"] = f"flatten submit failed: {exc}"
+        return out
+    reached_terminal, final = wait_for_terminal(
+        client, str(close_order.id), _CANCEL_CONFIRM_TIMEOUT_SEC)
+    if final is not None:
+        out["filled_qty"] = order_filled_qty(final)
+        out["avg_price"] = order_avg_price(final)
+    if not reached_terminal:
+        out["error"] = "flatten order did not reach a terminal state"
+    elif order_status_str(final) != "filled":
+        out["error"] = f"flatten ended {order_status_str(final)} " \
+                       f"(filled {out['filled_qty']}/{qty})"
+    return out
+
+
+def _resolve_entry_after_timeout(client, entry_order, client_order_id: str,
+                                 symbol: str, exit_side) -> dict:
+    """Rule 15: an entry-fill timeout never means nothing filled.
+
+    Re-read the order (by broker ID, then client order ID), cancel only
+    the unfilled remainder, wait for a CONFIRMED terminal state, then
+    flatten whatever actually filled. Returns a report dict; 'unknown'
+    status means the broker could not be consulted — the watcher must
+    alert for manual reconciliation.
+    """
+    out: dict = {"status": "unknown", "filled_qty": 0.0, "avg_price": None,
+                 "flattened": None, "detail": None}
+    order = None
+    try:
+        order = client.get_order_by_id(entry_order.id)
+    except Exception:
+        try:
+            order = client.get_order_by_client_id(client_order_id)
+        except Exception as exc:
+            out["detail"] = f"order unreadable after timeout: {exc}"
+            return out
+
+    if order_status_str(order) not in TERMINAL_ORDER_STATUSES:
+        try:
+            client.cancel_order_by_id(entry_order.id)
+        except Exception as exc:
+            out["detail"] = f"cancel after timeout failed: {exc}"
+        reached_terminal, final = wait_for_terminal(
+            client, str(entry_order.id), _CANCEL_CONFIRM_TIMEOUT_SEC)
+        if not reached_terminal or final is None:
+            out["detail"] = "cancel never reached a terminal state"
+            return out
+        order = final
+
+    out["filled_qty"] = order_filled_qty(order)
+    out["avg_price"] = order_avg_price(order)
+    if out["filled_qty"] <= 0:
+        out["status"] = "none_filled"
+        return out
+    # Partial (or late full) fill with no protective orders in place:
+    # flatten it — a rump position with stale bracket prices is worse
+    # than no position for an intraday strategy.
+    out["flattened"] = _flatten_position(
+        client, symbol, exit_side, int(out["filled_qty"]))
+    out["status"] = ("flattened" if not out["flattened"].get("error")
+                     else "flatten_failed")
+    return out
+
+
 def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     """Place market entry + two OCO bundles (50/50 scale-out).
 
@@ -608,15 +737,10 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
 
     symbol = setup_result["symbol"]
     shares = sizing["shares"]
-    # TP1 takes 50% of shares (round down); TP2 takes the remainder.
-    tp1_qty = shares // 2
-    tp2_qty = shares - tp1_qty
-    if tp1_qty < 1 or tp2_qty < 1:
-        # Can't split 1 share cleanly between two TP orders. Send the
-        # single share to TP1 and skip TP2 — D5b management will close
-        # the runner via the time-stop or 3:55 PM hard exit.
-        tp1_qty = shares
-        tp2_qty = 0
+    # TP1/TP2 split is computed AFTER the fill, from the actual filled
+    # quantity — exit orders must cover exactly what we hold, never the
+    # requested amount. (Single share: all to TP1, no TP2 — D5b
+    # management closes the runner via time-stop or 3:55 PM hard exit.)
 
     errors: list[tuple[str, str]] = []
     order_ids: dict[str, str | None] = {
@@ -626,17 +750,21 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
     }
 
     # --- 1. Market entry (BUY for longs, SELL-short for shorts) ---
-    # Tag with client_order_id encoding setup type + direction — D5c
-    # lifecycle stats parses this back out for per-setup expectancy AND
-    # to reconstruct short trades (entry side is sell there).
-    # Format: DAY-{A|B|AS|BS}-{SYMBOL}-{epoch_seconds}. Safely under
-    # Alpaca's 48-char client_order_id limit.
+    # Deterministic canonical coid (Phase 2 / Addendum B): derived from
+    # the SIGNAL BAR timestamp, so a duplicate workflow run re-mints the
+    # identical ID and Alpaca rejects the second submission instead of
+    # double-entering. Lifecycle stats parse the setup token back out.
     setup_token = f"{setup_result['setup']}{'S' if is_short else ''}"
-    epoch_s = int(datetime.now(timezone.utc).timestamp())
-    client_order_id = (
-        f"{_CLIENT_ORDER_ID_PREFIX}-{setup_token}-"
-        f"{symbol}-{epoch_s}"
-    )
+    signal_ts = setup_result.get("signal_bar_ts")
+    if signal_ts is None:
+        # Defensive fallback (older callers) — wall-clock, NOT
+        # deterministic; production evaluators always set signal_bar_ts.
+        signal_ts = datetime.now(timezone.utc)
+        print(f"[day_trader] WARNING: {symbol} setup_result lacks "
+              f"signal_bar_ts — entry coid not deterministic",
+              file=sys.stderr)
+    client_order_id = make_client_order_id(
+        _CANONICAL_PREFIX, symbol, setup_token, signal_ts, "entry", 0)
     try:
         entry_req = MarketOrderRequest(
             symbol=symbol, qty=shares, side=entry_side,
@@ -646,23 +774,65 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
         entry_order = client.submit_order(entry_req)
         order_ids["entry"] = str(entry_order.id)
     except Exception as exc:
+        if "client_order_id must be unique" in str(exc).lower() or \
+                "duplicate" in str(exc).lower():
+            # The deterministic ID did its job: this logical entry was
+            # already submitted (racing run / retry). Do NOT re-enter.
+            return {
+                "placed": False, "protective_orders_complete": False,
+                "skip_reason": "duplicate_entry_prevented_by_coid",
+                "order_ids": order_ids,
+            }
         return {
             "placed": False, "protective_orders_complete": False,
             "errors": [("entry", str(exc))], "order_ids": order_ids,
         }
 
     # Wait for fill — without a confirmed fill, protective orders are
-    # placing into thin air.
+    # placing into thin air. A timeout NEVER means nothing filled
+    # (rule 15): resolve the real state and flatten any partial.
     try:
         filled = _wait_for_fill(client, entry_order.id)
         fill_price = float(filled.filled_avg_price)
         filled_at = getattr(filled, "filled_at", None)
     except Exception as exc:
+        recovery = _resolve_entry_after_timeout(
+            client, entry_order, client_order_id, symbol, exit_side)
         return {
             "placed": True, "protective_orders_complete": False,
             "errors": [("entry_fill_wait", str(exc))],
             "order_ids": order_ids,
+            "timeout_recovery": recovery,
         }
+
+    filled_qty = int(float(getattr(filled, "filled_qty", shares) or shares))
+
+    # Fill-based risk check (Phase 2 pattern): sizing/stops were computed
+    # from the SIGNAL price; verify the ACTUAL fill didn't push realized
+    # risk past approved + tolerance. Breach -> flatten immediately.
+    approved_risk = sizing["risk_dollars"]
+    actual_risk = filled_qty * abs(fill_price - setup_result["stop"])
+    if actual_risk > approved_risk * (1 + _ACTUAL_RISK_TOLERANCE):
+        flatten = _flatten_position(client, symbol, exit_side, filled_qty)
+        return {
+            "placed": True, "protective_orders_complete": False,
+            "symbol": symbol, "direction": direction,
+            "fill_price": fill_price, "shares": filled_qty,
+            "errors": [("excess_actual_risk",
+                        f"actual ${actual_risk:.2f} > approved "
+                        f"${approved_risk:.2f} +{_ACTUAL_RISK_TOLERANCE*100:.0f}% "
+                        f"— position flattened")],
+            "order_ids": order_ids,
+            "flattened": flatten,
+        }
+
+    # Exit orders cover exactly the FILLED quantity (defensive — Alpaca
+    # 'filled' means fully filled, but never size exits off the request).
+    tp1_qty = filled_qty // 2
+    tp2_qty = filled_qty - tp1_qty
+    if tp1_qty < 1 or tp2_qty < 1:
+        tp1_qty = filled_qty
+        tp2_qty = 0
 
     stop_px = round(setup_result["stop"], 2)
 
@@ -683,6 +853,8 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
             order_class=OrderClass.OCO,
             take_profit=TakeProfitRequest(limit_price=tp1_px),
             stop_loss=StopLossRequest(stop_price=stop_px),
+            client_order_id=make_client_order_id(
+                _CANONICAL_PREFIX, symbol, setup_token, signal_ts, "tp1", 0),
         ))
         order_ids["oco_tp1"] = str(oco1.id)
         order_ids["oco_tp1_stop"] = _extract_stop_leg_id(oco1)
@@ -699,6 +871,8 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
                 order_class=OrderClass.OCO,
                 take_profit=TakeProfitRequest(limit_price=tp2_px),
                 stop_loss=StopLossRequest(stop_price=stop_px),
+                client_order_id=make_client_order_id(
+                    _CANONICAL_PREFIX, symbol, setup_token, signal_ts, "tp2", 0),
             ))
             order_ids["oco_tp2"] = str(oco2.id)
             order_ids["oco_tp2_stop"] = _extract_stop_leg_id(oco2)
@@ -710,12 +884,31 @@ def place_entry_bundle(setup_result: dict, equity: float, client=None) -> dict:
         needed.add("oco_tp2")
     protective_ok = all(order_ids.get(k) is not None for k in needed)
 
+    # Incomplete protection = an open position with partial or no exit
+    # coverage. Don't leave it exposed for the next 5-min tick: cancel
+    # whatever OCOs did land (confirmed), then flatten (fail closed).
+    flattened = None
+    if not protective_ok:
+        for key in ("oco_tp1", "oco_tp2"):
+            oid = order_ids.get(key)
+            if oid is None:
+                continue
+            try:
+                client.cancel_order_by_id(oid)
+                wait_for_terminal(client, oid, _CANCEL_CONFIRM_TIMEOUT_SEC)
+            except Exception as exc:
+                errors.append((f"{key}_cancel", str(exc)))
+        flattened = _flatten_position(client, symbol, exit_side, filled_qty)
+        errors.append(("unprotected_position",
+                       "OCO coverage incomplete — position flattened"))
+
     return {
         "placed": True,
         "protective_orders_complete": protective_ok,
+        "flattened": flattened,
         "symbol": symbol,
         "direction": direction,
-        "shares": shares,
+        "shares": filled_qty,
         "fill_price": fill_price,
         "filled_at": filled_at,
         "stop_price": round(setup_result["stop"], 2),
@@ -1108,16 +1301,21 @@ _SETUP_TOKENS = ("A", "B", "AS", "BS")  # AS/BS = short-side variants
 def _parse_setup_from_client_order_id(client_order_id: str | None) -> str:
     """Recover setup token from the entry order's client_order_id.
 
-    Format: DAY-{A|B|AS|BS}-{SYMBOL}-{epoch_seconds}. Returns the token
-    or 'unknown' when the prefix is missing or malformed (covers orders
-    placed manually or by older code).
+    Accepts both formats:
+      legacy:    DAY-{A|B|AS|BS}-{SYMBOL}-{epoch_seconds}   (token at [1])
+      canonical: day-{SYMBOL}-{token}-{ts}-{action}-{leg}   (token at [2])
+    Returns 'unknown' when the prefix is missing or malformed (covers
+    orders placed manually or by older code).
     """
     if not client_order_id:
         return "unknown"
     parts = client_order_id.split("-")
-    if len(parts) < 2 or parts[0] != _CLIENT_ORDER_ID_PREFIX:
+    if len(parts) >= 2 and parts[0] == _CLIENT_ORDER_ID_PREFIX:
+        setup = parts[1]
+    elif len(parts) >= 3 and parts[0] == _CANONICAL_PREFIX:
+        setup = parts[2]
+    else:
         return "unknown"
-    setup = parts[1]
     return setup if setup in _SETUP_TOKENS else "unknown"
 
 
