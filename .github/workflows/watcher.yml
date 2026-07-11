@@ -23,10 +23,12 @@ permissions:
   contents: read
   actions: read   # fallback guard needs to query workflow runs
 
-# Serialize scans (same rationale as day-watcher.yml): overlapping runs
-# could each pass the max-positions gate before the other's fill lands.
+# One group across ALL workflows that touch the paper account + state
+# repo (swing-manager.yml shares it): overlapping runs could each pass
+# the max-positions gate before the other's fill lands, or race the
+# journal push. Queued, never cancelled.
 concurrency:
-  group: crypto-watcher-scan
+  group: alpaca-paper-trading-state
   cancel-in-progress: false
 
 jobs:
@@ -71,10 +73,27 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Clone private state repository
+        if: github.event.inputs.test_ping != 'true' && steps.guard.outputs.skip != 'true'
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        run: |
+          if [ -z "${STATE_REPO_TOKEN}" ]; then
+            echo "STATE_REPO_TOKEN not set — journal unavailable; the"
+            echo "watcher stays alerts-only for entries (fail closed)."
+            exit 0
+          fi
+          git clone --depth 50 \
+            "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/AI-Trading-State.git" \
+            "${GITHUB_WORKSPACE}/state-repo"
+          git -C "${GITHUB_WORKSPACE}/state-repo" config user.name "crypto-watcher[bot]"
+          git -C "${GITHUB_WORKSPACE}/state-repo" config user.email "crypto-watcher@users.noreply.github.com"
+
       - name: Run watcher
         if: github.event.inputs.test_ping != 'true' && steps.guard.outputs.skip != 'true'
         run: python -m src.watcher
         env:
+          STATE_REPO_DIR: ${{ github.workspace }}/state-repo
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}

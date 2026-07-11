@@ -129,6 +129,27 @@ def format_entry_blocked(symbol: str, setup: str, reason: str) -> str:
     return f"🚫 ENTRY BLOCKED — {symbol} (Setup {setup}): {reason}"
 
 
+def format_protected_entry(result: dict) -> str:
+    """Telegram message for a Phase 3 protected entry (one verified
+    stop; TP1/TP2 are application-managed levels, not resting orders)."""
+    qty = result.get("filled_qty")
+    avg = result.get("avg_fill_price")
+    notional = (qty * avg) if (qty and avg) else None
+    lines = [
+        f"📥 ENTRY PROTECTED — {result.get('symbol')} "
+        f"(trade {result.get('trade_id')})",
+        "",
+        f"Filled qty:  {qty}",
+        f"Avg price:   {avg}",
+        f"Notional:    ${notional:.2f}" if notional is not None else "Notional:    n/a",
+        "",
+        f"Stop order:  {result.get('stop_order_id')} (verified, full qty)",
+        f"TP1 level:   {result.get('tp1')} (app-managed)",
+        f"TP2 level:   {result.get('tp2')} (app-managed)",
+    ]
+    return "\n".join(lines)
+
+
 def format_management_action(action: dict) -> str:
     """Telegram message for one in-trade management action (Phase 5b)."""
     sym = action.get("symbol", "?")

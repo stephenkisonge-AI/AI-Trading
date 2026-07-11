@@ -325,7 +325,9 @@ class Journal:
             elif kind == "STATE_TRANSITION":
                 view.state = payload.get("to_state", view.state)
             elif kind == "EXIT_REALIZED":
-                view.exits.append(payload)
+                # Keep the event time — runner HWM windows and per-day
+                # risk ledgers key off when the exit actually happened.
+                view.exits.append({**payload, "_ts": event["ts"]})
             elif kind == "TRADE_CLOSED":
                 view.realized_r = payload.get("realized_r", view.realized_r)
             elif kind == "ERROR":

@@ -53,6 +53,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="how many days of recent broker orders to inspect")
     parser.add_argument("--sync", action="store_true",
                         help="git-pull the state repo before reconciling (GitJournal only)")
+    parser.add_argument("--clear-freeze", action="store_true",
+                        help="if (and only if) reconciliation is fully clean, "
+                             "lift the journal entry freeze. Journal-only "
+                             "write; still never touches broker orders.")
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -88,6 +92,13 @@ def main(argv: list[str] | None = None) -> int:
 
     report = reconcile(journal, positions, open_orders, recent_orders)
     print(report.render())
+    if report.ok and args.clear_freeze and journal.entry_freeze()["frozen"]:
+        if journal.set_entry_freeze(False, "reconciliation passed clean"):
+            print("entry freeze LIFTED (reconciliation clean).")
+        else:
+            print("reconciliation clean but freeze-lift persistence failed — "
+                  "freeze remains.", file=sys.stderr)
+            return 2
     return 0 if report.ok else 1
 
 
