@@ -14,22 +14,24 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from src.data import _assert_paper_mode, get_bars, get_positions
+from src.data import _assert_paper_mode, get_bars, get_client, get_positions
 from src.indicators import add_indicators
 from src.notifier import (
-    format_entry_placed,
-    format_management_action,
+    format_protected_entry,
     format_scan_summary,
     format_setup_alert,
     send_alert,
 )
 from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
-from src.trader import (
-    auto_execute_enabled,
-    check_safety_gates,
-    manage_open_positions,
-    place_entry_bundle,
-    summarize_lifecycle,
+from src.trader import auto_execute_enabled, summarize_lifecycle
+from src.entry_gates import evaluate_entry_gates
+from src.execution import load_exec_config
+from src.swing_exits import manage_swing_trades, open_protected_trade
+from src.swing_runtime import (
+    build_synced_journal,
+    quote_for,
+    regime_for,
+    runner_ctx_for,
 )
 
 # Universe — single source of truth in src/universe.py (shared with the
@@ -142,17 +144,71 @@ def main() -> int:
     auto_exec = auto_execute_enabled()
     print(f"[watcher] auto-execute enabled: {auto_exec}")
 
-    # Phase 5b — manage open positions BEFORE the entry pass so any closes
-    # free up position slots in time for the entry-side safety gates.
-    mgmt_actions: list[dict] = []
+    # Phase 4 — journal + reconciliation preflight. A missing/unsynced
+    # journal or a dirty reconciliation FREEZES entries (fail closed);
+    # management and alerts continue regardless.
+    journal = None
+    entries_frozen_reason: str | None = None
+    exec_config = None
+    # The journal is built even in alerts-only mode so Phase 5 baseline
+    # telemetry accumulates before auto-execution is re-enabled.
+    journal, journal_error = build_synced_journal()
+    if journal_error:
+        print(f"[watcher] journal unavailable: {journal_error}",
+              file=sys.stderr)
     if auto_exec:
+        if journal_error:
+            entries_frozen_reason = journal_error
+            print(f"[watcher] journal unavailable: {journal_error} — "
+                  f"new entries frozen", file=sys.stderr)
         try:
-            mgmt_actions = manage_open_positions()
+            exec_config = load_exec_config()
+        except ValueError as exc:
+            entries_frozen_reason = entries_frozen_reason or f"bad exec config: {exc}"
+            print(f"[watcher] exec config invalid: {exc} — new entries "
+                  f"frozen", file=sys.stderr)
+        if journal is not None and entries_frozen_reason is None:
+            # Read-only reconciliation before the entry pass (rule 20).
+            try:
+                from datetime import timedelta as _td
+                from alpaca.trading.enums import QueryOrderStatus
+                from alpaca.trading.requests import GetOrdersRequest
+                from src.reconciliation import reconcile
+                client = get_client()
+                report = reconcile(
+                    journal,
+                    client.get_all_positions(),
+                    client.get_orders(filter=GetOrdersRequest(
+                        status=QueryOrderStatus.OPEN, limit=500)),
+                    client.get_orders(filter=GetOrdersRequest(
+                        status=QueryOrderStatus.CLOSED,
+                        after=datetime.now(timezone.utc) - _td(days=14),
+                        limit=500)),
+                )
+                print(report.render())
+                if not report.ok:
+                    entries_frozen_reason = (
+                        f"reconciliation found {len(report.findings)} "
+                        f"mismatch(es)")
+                    send_alert(
+                        f"⚠️ Reconciliation mismatches — new entries frozen.\n\n"
+                        + "\n".join(str(f) for f in report.findings[:10]))
+            except Exception as exc:
+                entries_frozen_reason = f"reconciliation could not run: {exc}"
+                print(f"[watcher] reconciliation failed: {exc}", file=sys.stderr)
+
+    # Management BEFORE the entry pass so closes free position slots.
+    # Runs even when entries are frozen — risk reduction is never gated.
+    mgmt_actions: list[dict] = []
+    if auto_exec and journal is not None and exec_config is not None:
+        try:
+            mgmt_actions = manage_swing_trades(
+                get_client(), journal, config=exec_config,
+                alert_fn=send_alert, get_quote_fn=quote_for,
+                regime_fn=regime_for, runner_ctx_fn=runner_ctx_for)
             for action in mgmt_actions:
                 print(f"[watcher] mgmt action: {action}")
-                send_alert(format_management_action(action))
             if mgmt_actions:
-                # Refresh positions list — some may have just closed.
                 try:
                     positions = get_positions()
                     print(f"[watcher] positions refreshed after mgmt: {len(positions)}")
@@ -195,49 +251,64 @@ def main() -> int:
                 if not auto_exec:
                     continue
 
-                # Auto-execution path: safety gates → place bundle → alert
-                gate = check_safety_gates(symbol)
-                if not gate.allowed:
-                    note = f"Setup {setup_result['setup']} blocked: {gate.reason}"
+                # Phase 4 auto-execution path — every gate fails closed.
+                if entries_frozen_reason is not None:
+                    note = (f"Setup {setup_result['setup']} blocked: "
+                            f"entries frozen ({entries_frozen_reason})")
                     print(f"[watcher] {symbol}: {note}")
                     result["execution_notes"].append(note)
                     continue
 
-                entry = setup_result["entry"]
-                stop = setup_result["stop"]
-                tp1 = entry + 1.5 * (entry - stop)
-                tp2 = entry + 3.0 * (entry - stop)
-                exec_result = place_entry_bundle(
-                    symbol=symbol,
-                    entry_price_hint=entry,
-                    stop_price=stop,
-                    tp1_price=tp1,
-                    tp2_price=tp2,
-                )
+                def _portfolio_history():
+                    from alpaca.trading.requests import GetPortfolioHistoryRequest
+                    hist = get_client().get_portfolio_history(
+                        GetPortfolioHistoryRequest(period="1M", timeframe="1D"))
+                    return hist.equity or []
 
-                if exec_result["entry_filled_qty"] is None:
-                    note = (
-                        f"Setup {setup_result['setup']} execution FAILED before fill: "
-                        f"{'; '.join(exec_result['errors']) or 'unknown'}"
-                    )
-                    print(f"[watcher] {symbol}: {note}", file=sys.stderr)
+                gate = evaluate_entry_gates(
+                    journal=journal, client=get_client(), symbol=symbol,
+                    get_quote_fn=quote_for,
+                    portfolio_history_fn=_portfolio_history)
+                if not gate.allowed:
+                    note = f"Setup {setup_result['setup']} blocked: {gate}"
+                    print(f"[watcher] {symbol}: {note}")
                     result["execution_notes"].append(note)
-                    send_alert(
-                        f"⚠️ ENTRY FAILED — {symbol} (Setup {setup_result['setup']})\n\n"
-                        f"{'; '.join(exec_result['errors']) or 'no details'}"
-                    )
                     continue
 
-                placed_msg = format_entry_placed(symbol, setup_result["setup"], exec_result)
-                send_alert(placed_msg)
-                note = (
-                    f"Setup {setup_result['setup']} EXECUTED: "
-                    f"qty={exec_result['entry_filled_qty']} "
-                    f"@ {exec_result['entry_filled_avg_price']} "
-                    f"(protective_complete={exec_result['protective_orders_complete']})"
-                )
+                try:
+                    equity = float(get_client().get_account().equity)
+                except Exception as exc:
+                    note = (f"Setup {setup_result['setup']} blocked: equity "
+                            f"re-read failed ({exc}) — fail closed")
+                    print(f"[watcher] {symbol}: {note}", file=sys.stderr)
+                    result["execution_notes"].append(note)
+                    continue
+
+                exec_result = open_protected_trade(
+                    get_client(), journal, symbol=symbol,
+                    setup=setup_result["setup"],
+                    signal_ts=setup_result["signal_bar_ts"],
+                    planned_entry=setup_result["entry"],
+                    structural_stop=setup_result["stop"],
+                    equity=equity, config=exec_config,
+                    alert_fn=send_alert)
+
+                note = (f"Setup {setup_result['setup']} "
+                        f"{exec_result['status'].upper()}: "
+                        f"{exec_result.get('detail') or ''} "
+                        f"qty={exec_result.get('filled_qty')} "
+                        f"@ {exec_result.get('avg_fill_price')}").strip()
                 print(f"[watcher] {symbol}: {note}")
                 result["execution_notes"].append(note)
+                if exec_result["status"] == "protected":
+                    send_alert(format_protected_entry(exec_result))
+                elif exec_result["status"] in ("aborted",):
+                    send_alert(
+                        f"⚠️ ENTRY FAILED — {symbol} "
+                        f"(Setup {setup_result['setup']}): "
+                        f"{exec_result.get('detail') or 'no details'}")
+                # "unwound"/"recovery_required" already alerted CRITICAL
+                # inside the execution layer; "skipped" is silent.
         except Exception as exc:
             tb = traceback.format_exc()
             print(f"[watcher] ERROR scanning {symbol}: {exc}\n{tb}", file=sys.stderr)
@@ -251,13 +322,30 @@ def main() -> int:
         except Exception as exc:
             print(f"[watcher] lifecycle summary failed: {exc}", file=sys.stderr)
 
-    next_scan_eat = _next_scan_eat(run_started)
+    # Phase 5 — scan telemetry (instrumentation only, no rule changes).
     run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")
+    funnel_summary_line = ""
+    try:
+        from src.funnel import build_scan_record, funnel_line, persist_scan_record
+        record = build_scan_record(scan_results, scan_ts=run_started,
+                                   run_kind=run_kind)
+        funnel_summary_line = funnel_line(scan_results)
+        print(f"[watcher] {funnel_summary_line}")
+        if journal is not None:
+            persisted = persist_scan_record(journal, record)
+            print(f"[watcher] telemetry persisted: {persisted}")
+    except Exception as exc:
+        print(f"[watcher] telemetry failed (non-blocking): {exc}",
+              file=sys.stderr)
+
+    next_scan_eat = _next_scan_eat(run_started)
     summary_msg = format_scan_summary(
         scan_results, errors, run_started, next_scan_eat,
         run_kind=run_kind, mgmt_actions=mgmt_actions,
         lifecycle=lifecycle_stats,
     )
+    if funnel_summary_line:
+        summary_msg = f"{summary_msg}\n\n{funnel_summary_line}"
     sent = send_alert(summary_msg)
     print(f"[watcher] sent end-of-run summary (kind={run_kind}): {sent}")
 

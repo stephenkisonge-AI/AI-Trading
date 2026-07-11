@@ -479,6 +479,9 @@ def evaluate_setup_a(
         "atr": None,
         "tp1": None,
         "tp2": None,
+        # Closed 5-min signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": cand_5min_df.index[-1] if len(cand_5min_df) else None,
     }
     if qualified:
         # Entry = last close; TP1 at +1R, TP2 at +2R. R = entry − stop.
@@ -638,6 +641,9 @@ def evaluate_setup_b(
         "atr": None,
         "tp1": None,
         "tp2": None,
+        # Closed 5-min signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": cand_5min_df.index[-1] if len(cand_5min_df) else None,
     }
     if qualified:
         r = last_close - stop
@@ -796,6 +802,9 @@ def evaluate_setup_a_short(
         "atr": None,
         "tp1": None,
         "tp2": None,
+        # Closed 5-min signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": cand_5min_df.index[-1] if len(cand_5min_df) else None,
     }
     if qualified:
         # R = stop − entry (stop above). TP1 at −1R, TP2 at −2R.
@@ -952,6 +961,9 @@ def evaluate_setup_b_short(
         "atr": None,
         "tp1": None,
         "tp2": None,
+        # Closed 5-min signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": cand_5min_df.index[-1] if len(cand_5min_df) else None,
     }
     if qualified:
         r = stop - last_close

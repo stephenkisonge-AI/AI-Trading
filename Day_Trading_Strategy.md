@@ -513,11 +513,25 @@ sequence on its own.
 **Phase D5a — auto-entry:**
 - Watcher detects a qualifying 10/10 setup.
 - Pre-execution safety gates run (all listed in §"Risk caps" + the
-  no-trade conditions).
+  no-trade conditions). Gates that depend on external data (weekly
+  loss history, quote/spread, lifecycle stats) FAIL CLOSED: if the
+  data is unavailable, new entries block — with one documented
+  carve-out: an unusable IEX quote passes only when the tape shows a
+  fresh trade (market demonstrably active).
 - If any gate fails: silent skip with reason logged in the next scan
   summary.
-- Otherwise: **market** entry → wait for fill → **stop-market** + TP1
-  limit + TP2 limit placed immediately as resting orders on Alpaca.
+- Otherwise: **market** entry (deterministic client order ID
+  `day-{SYMBOL}-{setup}-{signal_bar_ts}-entry-0`, so a racing
+  duplicate workflow run is rejected by Alpaca instead of
+  double-entering) → wait for fill → two OCO bundles (TP limit +
+  protective stop each) sized from the ACTUAL filled quantity.
+- Fill-timeout never assumes zero fill: the order is re-read (by
+  broker ID, then client order ID), the unfilled remainder cancelled
+  to a confirmed terminal state, and any partial fill flattened.
+- If the actual fill pushes realized risk more than 10% past the
+  approved (signal-priced) risk, the position is flattened instead of
+  protected as-is. If OCO coverage is incomplete after the fill, the
+  position is flattened (never left exposed until the next tick).
 - Telegram alert on every action.
 
 **Phase D5b — in-trade management:**

@@ -191,8 +191,32 @@ _SETUP_B_VOL_MULT = 1.2
 # -------------------------------------------------------------------------
 
 
-def _check(name: str, passed: bool, detail: str) -> dict:
-    return {"name": name, "passed": bool(passed), "detail": detail}
+def _check(name: str, passed: bool, detail: str, *, observed=None,
+           threshold=None, margin=None, kind: str = "state",
+           timeframe: str | None = None, candle_ts=None) -> dict:
+    """One condition evaluation, structured for Phase 5 telemetry.
+
+    observed/threshold — the numeric comparison inputs where they exist.
+    margin — signed, normalized distance to the pass boundary: positive
+        means passing with that much room, negative means failing by
+        that much (near-miss ranking keys off small negative margins).
+    kind — "event" for point-in-time occurrences the scan can miss
+        (reclaims, breakouts, retest confirmations), "state" for
+        continuing conditions (regime, trend, position).
+    """
+    out = {"name": name, "passed": bool(passed), "detail": detail,
+           "kind": kind}
+    if observed is not None:
+        out["observed"] = float(observed)
+    if threshold is not None:
+        out["threshold"] = float(threshold)
+    if margin is not None:
+        out["margin"] = float(margin)
+    if timeframe is not None:
+        out["timeframe"] = timeframe
+    if candle_ts is not None:
+        out["candle_ts"] = str(candle_ts)
+    return out
 
 
 def _find_swing_lows(h4_df: pd.DataFrame, window: int = _SWING_WINDOW) -> list[tuple[int, float]]:
@@ -286,7 +310,11 @@ def evaluate_setup_a(
 
     regime = classify_regime(daily_df)
     cond1 = regime in ("BULLISH", "IMPROVING_NEUTRAL")
-    conditions.append(_check("daily_regime_bullish_or_improving", cond1, f"regime={regime}"))
+    conditions.append(_check(
+        "daily_regime_bullish_or_improving", cond1, f"regime={regime}",
+        kind="state", timeframe="1Day",
+        candle_ts=daily_df.index[-1] if len(daily_df) else None,
+    ))
 
     h4_last = h4_df.iloc[-1]
     h4_close = float(h4_last["close"])
@@ -296,12 +324,17 @@ def evaluate_setup_a(
     h4_rsi = float(h4_last["rsi14"]) if pd.notna(h4_last["rsi14"]) else None
     h4_atr = float(h4_last["atr14"]) if pd.notna(h4_last["atr14"]) else None
 
+    h4_ts = h4_df.index[-1] if len(h4_df) else None
     cond2 = h4_ema200 is not None and h4_close > h4_ema200
     conditions.append(
         _check(
             "h4_price_above_ema200",
             cond2,
             f"close={h4_close:.4f} ema200={'NaN' if h4_ema200 is None else f'{h4_ema200:.4f}'}",
+            observed=h4_close, threshold=h4_ema200,
+            margin=(None if h4_ema200 is None
+                    else (h4_close - h4_ema200) / h4_ema200),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts,
         )
     )
 
@@ -327,15 +360,35 @@ def evaluate_setup_a(
         f"hl_intact={higher_low_intact} "
         f"recent_swing_low={'None' if higher_low_value is None else f'{higher_low_value:.4f}'}"
     )
-    conditions.append(_check("pullback_to_ema_and_higher_low_intact", cond3, detail3))
+    min_dist = min(d for d in (dist20, dist50) if d is not None)         if (dist20 is not None or dist50 is not None) else None
+    # Telemetry-only observer: would candle-RANGE interaction with the
+    # EMA20 have detected this pullback (low <= ema20 <= high) where the
+    # close-distance rule did not? Recorded, never used to qualify.
+    h4_low = float(h4_last["low"])
+    h4_high = float(h4_last["high"])
+    range_touch = (h4_ema20 is not None
+                   and h4_low <= h4_ema20 <= h4_high)
+    conditions.append(_check(
+        "pullback_to_ema_and_higher_low_intact", cond3, detail3,
+        observed=min_dist, threshold=_PULLBACK_PCT,
+        margin=(None if min_dist is None
+                else (_PULLBACK_PCT - min_dist) / _PULLBACK_PCT),
+        kind="state", timeframe="4Hour", candle_ts=h4_ts,
+    ))
 
     cond4 = h4_rsi is not None and _SETUP_A_RSI_MIN <= h4_rsi <= _SETUP_A_RSI_MAX
+    rsi_span = (_SETUP_A_RSI_MAX - _SETUP_A_RSI_MIN) / 2
     conditions.append(
         _check(
             "h4_rsi_in_pullback_zone",
             cond4,
             f"rsi14={'NaN' if h4_rsi is None else f'{h4_rsi:.2f}'} "
             f"window=[{_SETUP_A_RSI_MIN},{_SETUP_A_RSI_MAX}]",
+            observed=h4_rsi, threshold=_SETUP_A_RSI_MIN,
+            margin=(None if h4_rsi is None else
+                    min(h4_rsi - _SETUP_A_RSI_MIN,
+                        _SETUP_A_RSI_MAX - h4_rsi) / rsi_span),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts,
         )
     )
 
@@ -364,25 +417,68 @@ def evaluate_setup_a(
                 and h1_close > h1_open
             )
     cond5 = h1_reclaim_ok
+    h1_ts = h1_df.index[-1] if len(h1_df) else None
     conditions.append(
         _check(
             "h1_green_close_reclaims_ema20",
             cond5,
             f"prior_close={h1_prior_close} prior_ema20={h1_prior_ema20} "
             f"close={h1_close} ema20={h1_ema20} green={h1_close is not None and h1_open is not None and h1_close > h1_open}",
+            observed=h1_close, threshold=h1_ema20,
+            margin=(None if (h1_close is None or h1_ema20 is None)
+                    else (h1_close - h1_ema20) / h1_ema20),
+            kind="event", timeframe="1Hour", candle_ts=h1_ts,
         )
     )
+
+    # Telemetry-only observer (Phase 5, sampling limitation): the scan
+    # runs 4-hourly but reclaims are 1H events — did a strict reclaim
+    # occur within the previous 4 completed 1H bars, with no LATER
+    # completed 1H candle closing back below its own EMA20? Recorded,
+    # never used to qualify (that would be Variant B, a Phase 6
+    # experiment).
+    reclaim_window_hit = None
+    if len(h1_df) >= 5:
+        rows = h1_df.iloc[-4:]
+        for offset in range(len(rows)):
+            i = len(h1_df) - 4 + offset
+            bar = h1_df.iloc[i]
+            prev = h1_df.iloc[i - 1]
+            if pd.isna(bar["ema20"]) or pd.isna(prev["ema20"]):
+                continue
+            is_reclaim = (
+                float(prev["close"]) <= float(prev["ema20"])
+                and float(bar["close"]) > float(bar["ema20"])
+                and float(bar["close"]) > float(bar["open"])
+            )
+            if not is_reclaim:
+                continue
+            invalidated = False
+            for j in range(i + 1, len(h1_df)):
+                later = h1_df.iloc[j]
+                if pd.notna(later["ema20"]) and                         float(later["close"]) < float(later["ema20"]):
+                    invalidated = True
+                    break
+            if not invalidated:
+                reclaim_window_hit = str(h1_df.index[i])
+                break
 
     cond6 = (
         h1_volume is not None
         and h1_vol_sma is not None
         and h1_volume >= _SETUP_A_VOL_MULT * h1_vol_sma
     )
+    vol_floor = (None if h1_vol_sma is None
+                 else _SETUP_A_VOL_MULT * h1_vol_sma)
     conditions.append(
         _check(
             "h1_volume_above_threshold",
             cond6,
             f"vol={h1_volume} vol_sma20={h1_vol_sma} threshold={_SETUP_A_VOL_MULT}x",
+            observed=h1_volume, threshold=vol_floor,
+            margin=(None if (h1_volume is None or not vol_floor)
+                    else (h1_volume - vol_floor) / vol_floor),
+            kind="state", timeframe="1Hour", candle_ts=h1_ts,
         )
     )
 
@@ -395,16 +491,22 @@ def evaluate_setup_a(
         and stop_dist > 0
         and stop_dist <= _STOP_ATR_CAP * h4_atr
     )
+    stop_cap = None if h4_atr is None else _STOP_ATR_CAP * h4_atr
     conditions.append(
         _check(
             "stop_below_swing_low_within_atr_cap",
             cond7,
             f"stop={stop} stop_dist={stop_dist} atr14={h4_atr} cap={_STOP_ATR_CAP}xATR",
+            observed=stop_dist, threshold=stop_cap,
+            margin=(None if (stop_dist is None or not stop_cap)
+                    else (stop_cap - stop_dist) / stop_cap),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts,
         )
     )
 
     cond8 = not has_position
-    conditions.append(_check("no_existing_position", cond8, f"has_position={has_position}"))
+    conditions.append(_check("no_existing_position", cond8,
+                             f"has_position={has_position}", kind="state"))
 
     qualified = all(c["passed"] for c in conditions)
     result = {
@@ -415,6 +517,21 @@ def evaluate_setup_a(
         "entry": None,
         "stop": None,
         "atr": None,
+        # Closed 4H signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": h4_df.index[-1] if len(h4_df) else None,
+        # Phase 5 telemetry-only observers — never affect qualification.
+        "telemetry": {
+            # Reclaim seen within the 4 completed 1H bars between scans
+            # (None = no such event; timestamp string = the missed bar).
+            "reclaim_window_hit": reclaim_window_hit,
+            # Exact-bar reclaim as the current scanner sees it.
+            "reclaim_exact": bool(cond5),
+            # Would candle-range EMA20 interaction have detected the
+            # pullback where the close-distance rule did/didn't?
+            "pullback_close_rule": bool(pullback_ok),
+            "pullback_range_touch": bool(range_touch),
+        },
     }
     if qualified:
         result["entry"] = h4_close
@@ -437,7 +554,11 @@ def evaluate_setup_b(
 
     regime = classify_regime(daily_df)
     cond1 = regime == "BULLISH"
-    conditions.append(_check("daily_regime_bullish", cond1, f"regime={regime}"))
+    conditions.append(_check(
+        "daily_regime_bullish", cond1, f"regime={regime}",
+        kind="state", timeframe="1Day",
+        candle_ts=daily_df.index[-1] if len(daily_df) else None,
+    ))
 
     breakout = _find_recent_breakout(h4_df)
     cond2 = breakout is not None
@@ -446,6 +567,8 @@ def evaluate_setup_b(
             "breakout_above_20period_high_in_last_10",
             cond2,
             f"breakout={breakout if breakout is None else {'index': breakout['index'], 'level': breakout['level']}}",
+            kind="event", timeframe="4Hour",
+            candle_ts=None if breakout is None else breakout["timestamp"],
         )
     )
 
@@ -468,14 +591,28 @@ def evaluate_setup_b(
             cond3,
             f"breakout_close={'NA' if breakout is None else breakout['close']} "
             f"level={'NA' if breakout is None else breakout['level']}",
+            observed=None if breakout is None else breakout["close"],
+            threshold=None if breakout is None else breakout["level"],
+            margin=(None if breakout is None else
+                    (breakout["close"] - breakout["level"]) / breakout["level"]),
+            kind="event", timeframe="4Hour",
+            candle_ts=None if breakout is None else breakout["timestamp"],
         )
     )
+    b_vol_floor = (None if bar_vol_sma is None
+                   else _SETUP_B_VOL_MULT * bar_vol_sma)
     conditions.append(
         _check(
             "breakout_volume_above_threshold",
             cond4,
             f"vol={'NA' if breakout is None else breakout['volume']} "
             f"vol_sma20={bar_vol_sma} threshold={_SETUP_B_VOL_MULT}x",
+            observed=None if breakout is None else breakout["volume"],
+            threshold=b_vol_floor,
+            margin=(None if (breakout is None or not b_vol_floor)
+                    else (breakout["volume"] - b_vol_floor) / b_vol_floor),
+            kind="state", timeframe="4Hour",
+            candle_ts=None if breakout is None else breakout["timestamp"],
         )
     )
 
@@ -483,13 +620,20 @@ def evaluate_setup_b(
     h4_close = float(h4_last["close"])
     h4_rsi = float(h4_last["rsi14"]) if pd.notna(h4_last["rsi14"]) else None
     h4_atr = float(h4_last["atr14"]) if pd.notna(h4_last["atr14"]) else None
+    h4_ts_b = h4_df.index[-1] if len(h4_df) else None
     cond5 = h4_rsi is not None and _SETUP_B_RSI_MIN <= h4_rsi <= _SETUP_B_RSI_MAX
+    rsi_span_b = (_SETUP_B_RSI_MAX - _SETUP_B_RSI_MIN) / 2
     conditions.append(
         _check(
             "h4_rsi_in_momentum_zone",
             cond5,
             f"rsi14={'NaN' if h4_rsi is None else f'{h4_rsi:.2f}'} "
             f"window=[{_SETUP_B_RSI_MIN},{_SETUP_B_RSI_MAX}]",
+            observed=h4_rsi, threshold=_SETUP_B_RSI_MIN,
+            margin=(None if h4_rsi is None else
+                    min(h4_rsi - _SETUP_B_RSI_MIN,
+                        _SETUP_B_RSI_MAX - h4_rsi) / rsi_span_b),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts_b,
         )
     )
 
@@ -502,6 +646,8 @@ def evaluate_setup_b(
             "h1_retest_of_level_held",
             cond6,
             f"retest={retest}",
+            kind="event", timeframe="1Hour",
+            candle_ts=None if retest is None else retest["confirm_ts"],
         )
     )
 
@@ -521,17 +667,23 @@ def evaluate_setup_b(
         and stop_dist <= _STOP_ATR_CAP * h4_atr
         and not no_chase_violation
     )
+    stop_cap_b = None if h4_atr is None else _STOP_ATR_CAP * h4_atr
     conditions.append(
         _check(
             "stop_below_retested_level_within_atr_cap",
             cond7,
             f"stop={stop} stop_dist={stop_dist} atr14={h4_atr} "
             f"cap={_STOP_ATR_CAP}xATR no_chase_violation={no_chase_violation}",
+            observed=stop_dist, threshold=stop_cap_b,
+            margin=(None if (stop_dist is None or not stop_cap_b)
+                    else (stop_cap_b - stop_dist) / stop_cap_b),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts_b,
         )
     )
 
     cond8 = not has_position
-    conditions.append(_check("no_existing_position", cond8, f"has_position={has_position}"))
+    conditions.append(_check("no_existing_position", cond8,
+                             f"has_position={has_position}", kind="state"))
 
     qualified = all(c["passed"] for c in conditions)
     result = {
@@ -542,6 +694,19 @@ def evaluate_setup_b(
         "entry": None,
         "stop": None,
         "atr": None,
+        # Closed 4H signal bar — deterministic client order IDs derive
+        # from this so a rerun of the same signal mints the same IDs.
+        "signal_bar_ts": h4_df.index[-1] if len(h4_df) else None,
+        # Phase 5 telemetry-only observers — never affect qualification.
+        "telemetry": {
+            "no_chase_violation": bool(no_chase_violation),
+            "breakout_ts": (None if breakout is None
+                            else str(breakout["timestamp"])),
+            "retest_touch_ts": (None if retest is None
+                                else str(retest["touch_ts"])),
+            "retest_confirm_ts": (None if retest is None
+                                  else str(retest["confirm_ts"])),
+        },
     }
     if qualified:
         result["entry"] = h4_close

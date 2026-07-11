@@ -178,20 +178,63 @@ after fees — not the headline number.
 - 1.5× ATR(14) below entry on the 4H chart
 - Just below the most recent 4H swing low
 
-Place this as a separate stop-limit order on Alpaca **immediately after
-fill confirmation.** Don't wait. Use `place_crypto_order` with
-`order_type="stop_limit"`.
-
 **Reward/risk minimum:** 2R required to enter. If we can't see a
 realistic path to 2R based on the next overhead resistance, skip.
 
-**Take-profit ladder:**
-- **TP1 at +1.5R:** close 50% of position. Place as a separate limit
-  sell order.
-- **Move stop to breakeven** after TP1 fills.
-- **TP2 at +3R:** close another 25% as a limit order.
-- **Final 25%:** trail with a 2× ATR stop OR exit on a 4H close below
-  the EMA 20, whichever triggers first.
+**Exit architecture (one broker-held stop + application-managed TPs).**
+At any moment the position has exactly ONE resting sell order at
+Alpaca: a stop-limit for the full current position quantity. TP1/TP2
+are *levels the application watches*, not resting limit orders. This
+replaced the earlier simultaneous bundle (stop 100% + TP1 50% + TP2
+25% resting at once — up to 175% of the position in open sells), which
+violated the sell-quantity invariant below. Implementation:
+`src/swing_exits.py`.
+
+- **At entry:** market entry → reconcile the actual fill → recompute
+  risk and TP levels from the actual average fill price → place one
+  stop-limit for exactly the filled quantity → verify Alpaca accepted
+  it and its remaining quantity equals the position. If protection
+  cannot be verified, the trade is marked RECOVERY_REQUIRED, new
+  entries freeze, and a CRITICAL alert fires. TP1/TP2 are persisted to
+  the journal as intended levels only.
+- **TP1 at +1.5R** (actual-fill R): when a *fresh* executable bid
+  (quote age ≤ 2 min; the bid is the executable side for a long's
+  sell) reaches the level: persist the intent → confirm position and
+  stop → cancel the stop and poll to a *confirmed terminal* state →
+  re-read the position → market-sell the 50% tranche → re-read → place
+  a replacement stop-limit at **breakeven** for exactly the remaining
+  quantity → verify accepted + quantity. The window with no broker-held
+  stop is measured and journaled on every transition.
+- **TP2 at +3R:** same sequence for 25%; the replacement stop keeps the
+  breakeven floor.
+- **Final 25% (runner):** trail with a 2× ATR stop OR exit on a 4H
+  close below the EMA 20, whichever triggers first. Trail raises use
+  the same cancel-confirm-replace sequence. Stops never move down.
+- **Dust rule:** if a tranche would leave a remainder below Alpaca's
+  tradable increment, the entire remaining position is closed instead —
+  never leave an unprotectable dust position.
+- **Stale/unavailable quote:** no TP transition fires; the protective
+  stop stays untouched. A historical candle high is never treated as
+  proof a TP was executable at that price.
+
+**Gap watchdog (every management pass):** if a fresh bid is at or below
+the stop trigger while the stop-limit is still open/unfilled, the
+application cancels the stop (confirmed), market-sells the exact
+remaining quantity, confirms flat, and emits a CRITICAL alert. The
+watchdog runs at management cadence and is **not** equivalent to a
+broker-held stop-market order; Alpaca crypto does not support
+stop-market, so a fast gap through the limit band can still fill worse
+than modeled.
+
+**Sell-quantity invariant (checked after every transition):** the sum
+of *remaining* (unfilled) quantity across all open sell orders for a
+symbol must never exceed the current broker position quantity. A
+violation freezes new entries and marks the trade for reconciliation.
+
+**Unknown state = stand still:** if the stop's status or the position
+quantity cannot be established, nothing is submitted; the trade is
+marked RECOVERY_REQUIRED, entries freeze, and reconciliation
+(`scripts/reconcile.py`) must pass before entries resume.
 
 **Time stop:** If a trade hasn't hit TP1 within 10 days, close it at
 market. Capital should be working.
@@ -297,12 +340,15 @@ Type 'go' to execute, 'skip' to pass, or 'why' for more detail.
 
 After 'go':
 1. Place market entry via `place_crypto_order`.
-2. **Wait for fill confirmation.**
-3. Immediately place protective stop-limit order.
-4. Immediately place TP1 limit sell (50% qty).
-5. Immediately place TP2 limit sell (25% qty).
-6. Confirm all four orders by reading them back via `get_orders`.
-7. Tell me: "All protective orders placed. Position is now monitored."
+2. **Wait for fill confirmation** and note the actual average fill.
+3. Immediately place ONE protective stop-limit order for the full
+   filled quantity, and read it back via `get_orders` to confirm it
+   was accepted for the right amount.
+4. Record TP1/TP2 as watched levels (recomputed from the actual fill)
+   — do NOT place resting TP limit orders; take-profits execute as
+   market sells when price reaches the level, with the stop replaced
+   for the remainder each time (see "Exit architecture" above).
+5. Tell me: "Entry filled, stop verified. Position is now monitored."
 
 ### Daily summary (once per UTC day)
 
@@ -326,10 +372,12 @@ sequence on its own — no Claude session required.
 - Watcher detects a qualifying 8/8 setup
 - Pre-execution safety gates run (all listed below under 5b additions too)
 - If any gate fails: silent skip with reason logged in the scan summary
-- Otherwise: market entry → wait for fill → stop-limit + TP1 + TP2 placed
-  immediately as resting GTC orders on Alpaca
+- Otherwise: market entry → reconcile the actual fill → ONE verified
+  stop-limit for the full filled qty; TP1/TP2 journaled as watched
+  levels (no resting TP orders — see "Exit architecture" above)
 - Telegram alert on every action (setup found, entry placed, errors)
-- If protective orders fail after fill: urgent "INTERVENE" alert
+- If protection cannot be verified after fill: CRITICAL alert, trade
+  marked RECOVERY_REQUIRED, new entries frozen
 
 **Phase 5b (LIVE) — in-trade management + remaining gates:**
 
@@ -342,10 +390,10 @@ For each open position, in priority order:
    dies by its own daily.)
 2. **Time stop** — if position is >10 days old AND TP1 has not filled,
    cancel orders and close at market.
-3. **Breakeven move** — if TP1 has filled (detected via filled limit
-   sells since position open) but the open stop is still at its
-   original loss-side level, cancel old stop and place a new stop-limit
-   at avg_entry_price for remaining qty.
+3. **Breakeven move** — the TP1 transition itself places its
+   replacement stop at breakeven; the management pass additionally
+   enforces (idempotently, from journal state) that a post-TP1 stop
+   never sits below breakeven — covering crash-recovery corners.
 
 Pre-execution gates added in 5b (on top of 5a's daily-loss / position-cap
 / daily-entry gates):
@@ -361,8 +409,8 @@ scan summary also lists the management-action count and types.
 
 **Phase 5c (LIVE) — runner phase + lifecycle stats:**
 
-When TP2 has filled (detected via two filled non-stop limit SELLs since
-position open), the position enters runner phase. Each scan applies:
+When TP2 has filled (per journal state), the position enters runner
+phase. Each scan applies:
 
 - **Runner exit:** if the latest CLOSED 4H bar's close is below the 4H
   EMA20, cancel orders and market-close the runner. Telegram: 🏁 RUNNER

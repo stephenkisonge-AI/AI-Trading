@@ -34,6 +34,7 @@ def _short_setup_result():
         "setup": "A", "direction": "short", "symbol": "NVDA",
         "qualified": True, "conditions": [], "entry": 100.0, "stop": 101.0,
         "atr": 0.5, "tp1": 99.0, "tp2": 98.0,
+        "signal_bar_ts": datetime(2026, 5, 27, 14, 30, tzinfo=timezone.utc),
     }
 
 
@@ -91,8 +92,8 @@ def test_entry_bundle_short_places_sell_entry_and_buy_ocos():
     # Entry is a market SELL (short).
     assert requests[0].__class__.__name__ == "MarketOrderRequest"
     assert str(requests[0].side).lower().endswith("sell")
-    # client_order_id tags the short variant: DAY-AS-...
-    assert requests[0].client_order_id.startswith("DAY-AS-NVDA-")
+    # Canonical deterministic coid tags the short variant token AS.
+    assert requests[0].client_order_id == "day-NVDA-AS-20260527T143000Z-entry-0"
     # Both OCOs are BUY (cover) orders: TP limits below entry, stop above.
     for oco in requests[1:3]:
         assert str(oco.side).lower().endswith("buy")
@@ -371,8 +372,17 @@ def test_weekly_loss_gate_passes_when_flat():
     assert _gate_weekly_loss(client) is None
 
 
-def test_weekly_loss_gate_fails_open_on_infra_error():
-    assert _gate_weekly_loss(FakeClient()) is None  # no portfolio history attr
+def test_weekly_loss_gate_fails_closed_on_infra_error():
+    # INTENTIONALLY INVERTED (Addendum B audit): if the weekly loss cap
+    # can't be measured, it can't be trusted — new entries block.
+    class _NoHistoryClient:
+        def get_portfolio_history(self, *a, **k):
+            raise RuntimeError("portfolio history down")
+
+    decision = _gate_weekly_loss(_NoHistoryClient())
+    assert decision is not None
+    assert decision.allowed is False
+    assert "weekly_cap_data_unavailable" in decision.reason
 
 
 def _now_et_fixed():
@@ -488,19 +498,59 @@ def test_spread_gate_passes_tight_spread(monkeypatch):
     assert _gate_spread("NVDA") is None
 
 
-def test_spread_gate_fails_open_on_zero_quote(monkeypatch):
+def test_spread_gate_zero_quote_passes_only_with_fresh_tape(monkeypatch):
+    # INTENTIONALLY CHANGED (Addendum B audit): a degenerate quote used
+    # to fail open unconditionally. Now the documented IEX carve-out
+    # applies — a fresh tape (market demonstrably active) passes, a
+    # stale/unknown tape blocks.
     import src.day_data as day_data_mod
     monkeypatch.setattr(
         day_data_mod, "get_stock_latest_quote",
         lambda s: SimpleNamespace(bid_price=0.0, ask_price=100.0),
     )
-    assert _gate_spread("NVDA") is None
+    fresh = datetime.now(timezone.utc) - timedelta(seconds=5)
+    monkeypatch.setattr(
+        day_data_mod, "get_stock_latest_trade",
+        lambda s: SimpleNamespace(timestamp=fresh, price=100.0),
+    )
+    assert _gate_spread("NVDA") is None  # fresh tape → IEX artifact
+
+    stale = datetime.now(timezone.utc) - timedelta(minutes=10)
+    monkeypatch.setattr(
+        day_data_mod, "get_stock_latest_trade",
+        lambda s: SimpleNamespace(timestamp=stale, price=100.0),
+    )
+    decision = _gate_spread("NVDA")
+    assert decision is not None
+    assert decision.allowed is False
+    assert "quote_data_unavailable" in decision.reason
+
+
+def test_spread_gate_fetch_failure_blocks_without_fresh_tape(monkeypatch):
+    # Quote AND tape both unavailable → 'gate data unavailable' block.
+    import src.day_data as day_data_mod
+
+    def _boom(s):
+        raise RuntimeError("feed down")
+
+    monkeypatch.setattr(day_data_mod, "get_stock_latest_quote", _boom)
+    monkeypatch.setattr(day_data_mod, "get_stock_latest_trade", _boom)
+    decision = _gate_spread("NVDA")
+    assert decision is not None
+    assert decision.allowed is False
 
 
 def test_compute_week_pnl_pct():
     from src.day_trader import compute_week_pnl_pct
+
+    class _NoHistoryClient:
+        def get_portfolio_history(self, *a, **k):
+            raise RuntimeError("down")
+
     assert compute_week_pnl_pct(
         _PortfolioHistoryClient([100_000, 102_000])
     ) == pytest.approx(2.0)
     assert compute_week_pnl_pct(_PortfolioHistoryClient([100_000])) is None
-    assert compute_week_pnl_pct(FakeClient()) is None  # no history attr
+    # Display-only helper (not a gate) — None on unavailable history so
+    # callers render a placeholder.
+    assert compute_week_pnl_pct(_NoHistoryClient()) is None

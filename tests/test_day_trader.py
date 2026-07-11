@@ -164,6 +164,11 @@ class FakeClient:
             equity=str(self.equity), last_equity=str(self.last_equity)
         )
 
+    def get_portfolio_history(self, *args, **kwargs):
+        # Healthy flat history — the weekly-loss gate now FAILS CLOSED
+        # when history is unavailable, so the default fake provides it.
+        return SimpleNamespace(equity=[float(self.equity), float(self.equity)])
+
     def get_all_positions(self):
         return list(self._positions)
 
@@ -244,6 +249,7 @@ def _setup_result():
         "setup": "A", "symbol": "NVDA", "qualified": True,
         "conditions": [], "entry": 100.0, "stop": 99.0,
         "atr": 0.5, "tp1": 101.0, "tp2": 102.0,
+        "signal_bar_ts": datetime(2026, 5, 27, 14, 30, tzinfo=timezone.utc),
     }
 
 
@@ -412,11 +418,15 @@ def test_entry_bundle_handles_single_share_split():
     # risk-dollars side binds well below the $30K cap:
     # equity 200, entry 100, stop 99 (1% stop) → risk $1, needed $100,
     # capped at $100 (above the $50 floor). shares = floor(100/100) = 1.
-    client = FakeClient(equity=200, fill_price=100.5)
+    # fill_price 100.05: within the fill-based risk tolerance (1 share
+    # x $1.05 actual risk vs $1 approved +10%); a 100.5 fill would now
+    # (correctly) trigger the excess-risk flatten instead.
+    client = FakeClient(equity=200, fill_price=100.05)
     setup = {
         "setup": "A", "symbol": "ARM", "qualified": True, "conditions": [],
         "entry": 100.0, "stop": 99.0, "atr": 0.5,
         "tp1": 101.0, "tp2": 102.0,
+        "signal_bar_ts": datetime(2026, 5, 27, 14, 30, tzinfo=timezone.utc),
     }
     result = place_entry_bundle(setup, equity=200, client=client)
     assert result["placed"] is True
@@ -1046,17 +1056,26 @@ def test_lifecycle_per_symbol_breakdown():
 
 
 def test_entry_bundle_sets_client_order_id_for_setup_tagging():
-    """D4c expects D4a to tag entry BUYs with client_order_id so the
-    lifecycle walker can recover the setup type. Verify the tag format.
+    """Entries carry the canonical deterministic client_order_id
+    (Addendum B): day-{SYMBOL}-{setup}-{signal_bar_ts}-entry-0. The
+    lifecycle walker recovers the setup token from position [2], and a
+    duplicate workflow run re-mints the identical ID so Alpaca rejects
+    the double entry.
     """
-    client = FakeClient(equity=100_000, fill_price=100.5)
+    client = FakeClient(equity=100_000, fill_price=100.05)
     setup = _setup_result()  # setup == "A", symbol == "NVDA"
     result = place_entry_bundle(setup, equity=100_000, client=client)
     assert result["placed"] is True
 
     entry_req, _ = client.submitted[0]
-    assert hasattr(entry_req, "client_order_id")
-    assert entry_req.client_order_id.startswith("DAY-A-NVDA-")
+    assert entry_req.client_order_id == "day-NVDA-A-20260527T143000Z-entry-0"
+    # Determinism: the same signal always mints the same ID.
+    client2 = FakeClient(equity=100_000, fill_price=100.05)
+    place_entry_bundle(_setup_result(), equity=100_000, client=client2)
+    assert client2.submitted[0][0].client_order_id == entry_req.client_order_id
+    # OCOs are tagged too (tp1/tp2 legs of the same logical trade).
+    oco_req, _ = client.submitted[1]
+    assert oco_req.client_order_id == "day-NVDA-A-20260527T143000Z-tp1-0"
 
 
 # ---------------------------------------------------------------------------
@@ -1073,16 +1092,20 @@ def test_gate_no_lifecycle_stats_passes_through():
     assert decision.allowed is True
 
 
-def test_gate_lifecycle_with_error_field_fails_open():
-    """Lifecycle fetch failed — that's a data problem, not a strategy
-    violation. Gate must NOT block on stats errors.
+def test_gate_lifecycle_with_error_field_fails_closed():
+    """INTENTIONALLY INVERTED from the pre-audit behavior (Addendum B):
+    lifecycle stats power the expectancy breaker and loss cooldowns —
+    if they errored, those risk gates are blind, so new entries block
+    (Phase 4 fail-closed pattern). Old test pinned fail-open, which the
+    audit classified as confirmed unsafe behavior.
     """
     client = FakeClient(equity=100_000)
     decision = check_pre_execution_gates(
         client, _setup_result(), equity=100_000,
         lifecycle_stats={"error": "alpaca timeout", "days_back": 90},
     )
-    assert decision.allowed is True
+    assert decision.allowed is False
+    assert "lifecycle_stats_unavailable" in decision.reason
 
 
 def test_gate_clean_lifecycle_passes():
@@ -1160,3 +1183,110 @@ def test_gate_expectancy_runs_before_alpaca_calls(monkeypatch):
     )
     assert decision.allowed is False
     assert "expectancy_circuit_breaker" in decision.reason
+
+
+# ---------------------------------------------------------------------------
+# Addendum B audit — timeout recovery, unprotected flatten, risk validation
+# ---------------------------------------------------------------------------
+
+
+class _TimeoutClient(FakeClient):
+    """Entry never confirms in _wait_for_fill (patched to raise); the
+    scripted reads drive the post-timeout recovery: partially_filled on
+    the first re-read, canceled with 40 filled after the cancel."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.cancelled: list[str] = []
+        self._entry_states = ["partially_filled", "canceled"]
+
+    def get_order_by_id(self, order_id):
+        entry_req, entry_rec = self.submitted[0]
+        if entry_rec.id == order_id:
+            status = (self._entry_states.pop(0)
+                      if len(self._entry_states) > 1 else self._entry_states[0])
+            return SimpleNamespace(
+                id=entry_rec.id, status=status, filled_qty="40",
+                qty=entry_rec.qty, filled_avg_price="100.1",
+                client_order_id=entry_req.client_order_id)
+        return super().get_order_by_id(order_id)
+
+    def cancel_order_by_id(self, order_id):
+        self.cancelled.append(str(order_id))
+
+
+def test_entry_timeout_never_assumes_zero_fill(monkeypatch):
+    # Rule 15: on fill timeout the REAL state is resolved — the partial
+    # 40 shares are discovered, the remainder cancelled (confirmed
+    # terminal), and the partial flattened. Pre-audit behavior returned
+    # immediately, leaving 40 unprotected shares until the next tick.
+    monkeypatch.setattr(day_trader, "_wait_for_fill",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            TimeoutError("scripted timeout")))
+    client = _TimeoutClient(equity=100_000, fill_price=100.1)
+    result = place_entry_bundle(_setup_result(), equity=100_000, client=client)
+    assert result["placed"] is True
+    assert result["protective_orders_complete"] is False
+    recovery = result["timeout_recovery"]
+    assert recovery["status"] == "flattened"
+    assert recovery["filled_qty"] == 40.0
+    # The unfilled remainder was cancelled first, then the partial sold.
+    assert client.cancelled == [client.submitted[0][1].id]
+    flatten_req = client.submitted[-1][0]
+    assert flatten_req.__class__.__name__ == "MarketOrderRequest"
+    assert str(flatten_req.side).lower().endswith("sell")
+    assert int(flatten_req.qty) == 40
+
+
+class _OcoRejectingClient(FakeClient):
+    def submit_order(self, request):
+        if request.__class__.__name__ == "LimitOrderRequest":
+            raise RuntimeError("OCO rejected (scripted)")
+        return super().submit_order(request)
+
+
+def test_unprotected_position_is_flattened():
+    # Entry filled but no OCO landed: the position must not sit exposed
+    # until the next 5-minute tick — it is flattened (fail closed).
+    client = _OcoRejectingClient(equity=100_000, fill_price=100.05)
+    result = place_entry_bundle(_setup_result(), equity=100_000, client=client)
+    assert result["placed"] is True
+    assert result["protective_orders_complete"] is False
+    assert result["flattened"] is not None
+    assert result["flattened"]["submitted"] is True
+    assert any(name == "unprotected_position" for name, _ in result["errors"])
+    flatten_req = client.submitted[-1][0]
+    assert str(flatten_req.side).lower().endswith("sell")
+
+
+def test_excess_actual_risk_flattens_fill():
+    # Sizing/stops use the SIGNAL price; a fill that pushes actual risk
+    # past approved +10% is flattened instead of protected as-is.
+    # equity 200 → approved risk $1; 1 share filled at 100.5 vs stop 99
+    # → actual risk $1.50 (50% over).
+    client = FakeClient(equity=200, fill_price=100.5)
+    setup = dict(_setup_result(), symbol="ARM")
+    result = place_entry_bundle(setup, equity=200, client=client)
+    assert result["placed"] is True
+    assert result["protective_orders_complete"] is False
+    assert any(name == "excess_actual_risk" for name, _ in result["errors"])
+    assert result["flattened"]["submitted"] is True
+    # No OCOs were placed around the doomed position.
+    assert not any(r.__class__.__name__ == "LimitOrderRequest"
+                   for r, _ in client.submitted)
+
+
+class _DuplicateCoidClient(FakeClient):
+    def submit_order(self, request):
+        if request.__class__.__name__ == "MarketOrderRequest":
+            raise RuntimeError("client_order_id must be unique")
+        return super().submit_order(request)
+
+
+def test_duplicate_workflow_run_cannot_double_enter():
+    # Deterministic coid: a racing duplicate run mints the same ID and
+    # Alpaca rejects it — reported as a skip, not an error.
+    client = _DuplicateCoidClient(equity=100_000, fill_price=100.05)
+    result = place_entry_bundle(_setup_result(), equity=100_000, client=client)
+    assert result["placed"] is False
+    assert result["skip_reason"] == "duplicate_entry_prevented_by_coid"

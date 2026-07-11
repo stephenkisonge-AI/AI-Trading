@@ -1,0 +1,74 @@
+name: Swing Manager
+
+# Management-only pass for the crypto swing strand (Addendum E).
+# NEVER places entries — it protects, reduces, or closes positions:
+# gap watchdog, TP transitions, trail raises, time stops, regime exits,
+# crash-window recovery. Runs at a much faster cadence than the 4-hour
+# entry scan because at GH Actions deployment the watchdog and TP
+# triggers are only as fast as this workflow.
+
+on:
+  # PRIMARY — external cron (cron-job.org) POSTs
+  # {"event_type": "swing-manage-tick"} to /repos/{owner}/{repo}/dispatches
+  # every 15-30 min, same pattern as day-watcher.yml. Required because the
+  # free-tier native scheduler is best-effort.
+  repository_dispatch:
+    types: [swing-manage-tick]
+  # BACKUP — native schedule; drops most ticks but better than nothing
+  # when the external cron is down.
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group across ALL workflows that touch the paper account + state
+# repo (watcher.yml shares it): overlapping runs could double-manage a
+# transition or race the journal push. Queued, never cancelled, so a
+# management pass is never skipped.
+concurrency:
+  group: alpaca-paper-trading-state
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Clone private state repository
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        run: |
+          if [ -z "${STATE_REPO_TOKEN}" ]; then
+            echo "STATE_REPO_TOKEN not set — journal unavailable; the"
+            echo "manager will alert and exit nonzero (fail closed)."
+            exit 0
+          fi
+          git clone --depth 50 \
+            "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/AI-Trading-State.git" \
+            "${GITHUB_WORKSPACE}/state-repo"
+          git -C "${GITHUB_WORKSPACE}/state-repo" config user.name "swing-manager[bot]"
+          git -C "${GITHUB_WORKSPACE}/state-repo" config user.email "swing-manager@users.noreply.github.com"
+
+      - name: Run swing manager (management only — never entries)
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WATCHER_AUTO_EXECUTE: ${{ secrets.WATCHER_AUTO_EXECUTE }}
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
+          STATE_REPO_DIR: ${{ github.workspace }}/state-repo
+        run: python -m src.swing_manager
