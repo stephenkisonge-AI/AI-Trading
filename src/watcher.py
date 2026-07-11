@@ -150,8 +150,13 @@ def main() -> int:
     journal = None
     entries_frozen_reason: str | None = None
     exec_config = None
+    # The journal is built even in alerts-only mode so Phase 5 baseline
+    # telemetry accumulates before auto-execution is re-enabled.
+    journal, journal_error = build_synced_journal()
+    if journal_error:
+        print(f"[watcher] journal unavailable: {journal_error}",
+              file=sys.stderr)
     if auto_exec:
-        journal, journal_error = build_synced_journal()
         if journal_error:
             entries_frozen_reason = journal_error
             print(f"[watcher] journal unavailable: {journal_error} — "
@@ -317,13 +322,30 @@ def main() -> int:
         except Exception as exc:
             print(f"[watcher] lifecycle summary failed: {exc}", file=sys.stderr)
 
-    next_scan_eat = _next_scan_eat(run_started)
+    # Phase 5 — scan telemetry (instrumentation only, no rule changes).
     run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")
+    funnel_summary_line = ""
+    try:
+        from src.funnel import build_scan_record, funnel_line, persist_scan_record
+        record = build_scan_record(scan_results, scan_ts=run_started,
+                                   run_kind=run_kind)
+        funnel_summary_line = funnel_line(scan_results)
+        print(f"[watcher] {funnel_summary_line}")
+        if journal is not None:
+            persisted = persist_scan_record(journal, record)
+            print(f"[watcher] telemetry persisted: {persisted}")
+    except Exception as exc:
+        print(f"[watcher] telemetry failed (non-blocking): {exc}",
+              file=sys.stderr)
+
+    next_scan_eat = _next_scan_eat(run_started)
     summary_msg = format_scan_summary(
         scan_results, errors, run_started, next_scan_eat,
         run_kind=run_kind, mgmt_actions=mgmt_actions,
         lifecycle=lifecycle_stats,
     )
+    if funnel_summary_line:
+        summary_msg = f"{summary_msg}\n\n{funnel_summary_line}"
     sent = send_alert(summary_msg)
     print(f"[watcher] sent end-of-run summary (kind={run_kind}): {sent}")
 
