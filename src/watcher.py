@@ -333,7 +333,10 @@ def main() -> int:
         print(f"[watcher] {funnel_summary_line}")
         if journal is not None:
             persisted = persist_scan_record(journal, record)
-            print(f"[watcher] telemetry persisted: {persisted}")
+            # OK/FAILED, not True/False — the literal 'True' collides
+            # with GH Actions secret masking (ALPACA_PAPER_TRADE=True).
+            print(f"[watcher] telemetry persisted: "
+                  f"{'OK' if persisted else 'FAILED'}")
     except Exception as exc:
         print(f"[watcher] telemetry failed (non-blocking): {exc}",
               file=sys.stderr)
