@@ -106,7 +106,10 @@ def main(argv=None) -> int:
     print(f"  both:              {pullbacks['both']}")
 
     gates = gate_block_summary(records)
-    print("\n--- Qualified signals → execution ---")
+    # ASCII arrow: the Windows console default codepage (cp1252) cannot
+    # encode U+2192 and the report must be runnable locally, not just on
+    # the UTF-8 Actions runners.
+    print("\n--- Qualified signals -> execution ---")
     print(f"  qualified signals: {gates['qualified_signals']}")
     for reason, count in sorted(gates["gate_blocks"].items(),
                                 key=lambda kv: -kv[1]):
