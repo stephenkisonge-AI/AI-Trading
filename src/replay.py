@@ -218,9 +218,17 @@ def _h4_context(h4: pd.DataFrame, boundary: datetime):
 
 
 def simulate_trade(sig: Signal, variant: str, daily: pd.DataFrame,
-                   h4: pd.DataFrame, h1: pd.DataFrame) -> SimTrade:
+                   h4: pd.DataFrame, h1: pd.DataFrame,
+                   optimistic: bool = False) -> SimTrade:
     """Walk 1H bars after the signal, applying the strategy-doc exit
     rules. See module docstring for the fill model and its biases.
+
+    optimistic=True flips the fill model to its favorable bound for
+    sensitivity analysis: TPs fill on a wick touch (high >= level) and
+    are booked BEFORE a same-bar stop touch (a gap-open through the
+    stop still exits first — the open is the bar's first price). The
+    truth lies between the two models; conclusions should hold at both
+    bounds.
     """
     t = SimTrade(
         symbol=sig.symbol, variant=variant, signal_ts=sig.scan_ts,
@@ -249,13 +257,35 @@ def simulate_trade(sig: Signal, variant: str, daily: pd.DataFrame,
         o, hi, lo, cl = (float(bar["open"]), float(bar["high"]),
                          float(bar["low"]), float(bar["close"]))
 
-        # 1. Broker-held stop — always armed, checked first (pessimistic).
+        def maybe_book_tps(trigger_px: float):
+            """Book TP tranches a trigger price at/through the level."""
+            nonlocal frac, tp1_done, tp2_done, stop, hwm, tp2_ts
+            if not tp1_done and trigger_px >= t.tp1:
+                t.tranches.append((TP1_FRAC, t.tp1, ts, "tp1"))
+                frac -= TP1_FRAC
+                tp1_done = True
+                stop = max(stop, t.entry)      # breakeven floor
+                t.events.append(("breakeven", str(ts)))
+            if tp1_done and not tp2_done and trigger_px >= t.tp2:
+                t.tranches.append((TP2_FRAC, t.tp2, ts, "tp2"))
+                frac -= TP2_FRAC
+                tp2_done = True
+                hwm = hi
+                tp2_ts = ts
+                t.events.append(("runner_start", str(ts)))
+
+        # 1. Broker-held stop — always armed. A gap OPEN through the
+        # stop exits first under either fill model (the open is the
+        # bar's first price).
         if o <= stop:
             t.stop_hits.append({"symbol": sig.symbol, "bar_ts": str(ts),
                                 "stop": stop, "frac": frac,
                                 "gap_open": True, "variant": variant})
             close_out(o, ts, "stop_gap_open")
             break
+        # Optimistic bound: wick-touch TPs book before a same-bar stop.
+        if optimistic:
+            maybe_book_tps(hi)
         if lo <= stop:
             t.stop_hits.append({"symbol": sig.symbol, "bar_ts": str(ts),
                                 "stop": stop, "frac": frac,
@@ -276,20 +306,10 @@ def simulate_trade(sig: Signal, variant: str, daily: pd.DataFrame,
             close_out(cl, ts, "time_stop")
             break
 
-        # 4. App-managed TPs — need a 1H close at/through the level.
-        if not tp1_done and cl >= t.tp1:
-            t.tranches.append((TP1_FRAC, t.tp1, ts, "tp1"))
-            frac -= TP1_FRAC
-            tp1_done = True
-            stop = max(stop, t.entry)          # breakeven floor
-            t.events.append(("breakeven", str(ts)))
-        if tp1_done and not tp2_done and cl >= t.tp2:
-            t.tranches.append((TP2_FRAC, t.tp2, ts, "tp2"))
-            frac -= TP2_FRAC
-            tp2_done = True
-            hwm = hi
-            tp2_ts = ts
-            t.events.append(("runner_start", str(ts)))
+        # 4. App-managed TPs — conservative model needs a 1H CLOSE
+        # at/through the level (a wick is not an executable bid).
+        if not optimistic:
+            maybe_book_tps(cl)
 
         # 5. Runner management on each completed 4H bar.
         if tp2_done and frac > 0 and bar_end.hour % 4 == 0:

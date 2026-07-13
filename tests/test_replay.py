@@ -239,6 +239,30 @@ class TestSimulator:
         t = simulate_trade(sig, "exact", _empty_daily(), _empty_h4(), h1)
         assert t.exit_reasons() == ["stop"]
 
+    def test_optimistic_bound_books_wick_tp_before_stop(self):
+        sig = _sig()   # tp1 = 107.5
+        h1 = _bars(sig.scan_ts, timedelta(hours=1), [
+            # Wick through TP1 AND down through the (post-TP1
+            # breakeven) stop in the same bar.
+            _ohlc(100, 110, 94, 96),
+        ])
+        cons = simulate_trade(sig, "exact", _empty_daily(), _empty_h4(), h1)
+        opti = simulate_trade(sig, "exact", _empty_daily(), _empty_h4(), h1,
+                              optimistic=True)
+        assert cons.exit_reasons() == ["stop"]
+        assert cons.r_gross() == pytest.approx(-1.0)
+        assert opti.exit_reasons() == ["tp1", "stop"]
+        # Optimistic: half out at TP1, remainder stopped at breakeven.
+        assert opti.r_gross() == pytest.approx(0.5 * 1.5)
+        # A gap OPEN through the stop exits first even optimistically.
+        h1_gap = _bars(sig.scan_ts, timedelta(hours=1), [
+            _ohlc(100, 101, 99, 100.5),
+            _ohlc(90, 110, 89, 95),
+        ])
+        opti_gap = simulate_trade(sig, "exact", _empty_daily(),
+                                  _empty_h4(), h1_gap, optimistic=True)
+        assert opti_gap.exit_reasons() == ["stop_gap_open"]
+
     def test_time_stop_after_10_days_without_tp1(self):
         sig = _sig()
         n = 24 * 11
