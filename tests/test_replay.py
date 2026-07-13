@@ -11,8 +11,10 @@ from src.replay import (
     FRAME_LEN,
     Signal,
     evaluate_scan,
+    find_level_cross_events,
     frames_at,
     scan_times,
+    simulate_stop_limit,
     simulate_trade,
     summarize_trades,
 )
@@ -285,6 +287,106 @@ class TestSimulator:
         assert t.truncated and t.tranches[-1][0] == pytest.approx(0.25)
         # Total booked fraction is exactly the whole position.
         assert sum(f for f, _, _, _ in t.tranches) == pytest.approx(1.0)
+
+
+class TestStopLimitFill:
+    HOUR = _utc(2024, 9, 1, 12)
+
+    def _m1(self, rows):
+        return _bars(self.HOUR, timedelta(minutes=1), rows)
+
+    def test_sweep_stays_inside_band_fills_near_close(self):
+        # Stop 100, offset 1% -> limit 99. Low 99.5 stays above limit.
+        m1 = self._m1([_ohlc(101, 101, 99.5, 99.8)])
+        r = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 30)
+        assert r["filled_via_limit"]
+        assert r["exit_price"] == 99.8          # clamp(close, 99, 100)
+        assert r["slippage_pct"] == pytest.approx(0.002)
+
+    def test_fill_never_better_than_stop(self):
+        # Close recovered above the stop; fill is capped at the stop.
+        m1 = self._m1([_ohlc(101, 102, 99.5, 101.5)])
+        r = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 30)
+        assert r["exit_price"] == 100.0
+
+    def test_pierce_and_recover_fills_at_limit(self):
+        # Low breaks the band, close recovers to >= limit.
+        m1 = self._m1([_ohlc(101, 101, 98.0, 99.5)])
+        r = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 30)
+        assert r["filled_via_limit"]
+        assert r["exit_price"] == 99.0
+
+    def test_gap_through_then_recovery_fills_at_limit_later(self):
+        m1 = self._m1([
+            _ohlc(101, 101, 97.0, 97.5),   # through the whole band
+            _ohlc(97.5, 98.0, 97.0, 97.8),
+            _ohlc(97.8, 99.2, 97.8, 99.1), # high touches limit 99
+        ])
+        r = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 30)
+        assert r["filled_via_limit"]
+        assert r["exit_price"] == 99.0
+        assert r["exit_ts"] == m1.index[2]
+
+    def test_no_recovery_watchdog_closes_at_market(self):
+        rows = [_ohlc(101, 101, 97.0, 97.5)]
+        rows += [_ohlc(97.5 - 0.01 * i, 97.6 - 0.01 * i,
+                       97.3 - 0.01 * i, 97.4 - 0.01 * i, 1.0)
+                 for i in range(40)]
+        m1 = self._m1(rows)
+        r = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 15)
+        assert not r["filled_via_limit"]
+        # Market close at the open of the first bar >= trigger + 15 min.
+        assert r["exit_ts"] == m1.index[15]
+        assert r["exit_price"] == float(m1.iloc[15]["open"])
+        assert r["slippage_pct"] > 0.02
+
+    def test_wider_offset_converts_watchdog_to_limit_fill(self):
+        rows = [_ohlc(101, 101, 97.0, 97.5)]
+        rows += [_ohlc(97.5, 97.6, 97.3, 97.4, 1.0) for _ in range(40)]
+        m1 = self._m1(rows)
+        narrow = simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 15)
+        wide = simulate_stop_limit(m1, self.HOUR, 100.0, 0.03, 15)
+        assert not narrow["filled_via_limit"]
+        assert wide["filled_via_limit"]        # limit 97 is inside the sweep
+        assert wide["slippage_pct"] == pytest.approx(0.03)
+
+    def test_no_trigger_returns_none(self):
+        m1 = self._m1([_ohlc(101, 101, 100.5, 100.7)])
+        assert simulate_stop_limit(m1, self.HOUR, 100.0, 0.01, 30) is None
+
+
+class TestLevelCrossEvents:
+    def test_finds_first_breach_after_clear_period(self):
+        # A structural low inside the 80h lookback sets the level,
+        # price holds clear of it, then one bar sweeps through.
+        rows = _flat_rows(200, 100.0)
+        rows[100] = _ohlc(100, 100, 90.0, 100)    # the structural low
+        rows[150] = _ohlc(100, 100, 89.5, 95.0)   # the breach
+        h1 = _bars(_utc(2024, 9, 1), timedelta(hours=1), rows)
+        events = find_level_cross_events(h1)
+        assert len(events) == 1
+        assert events[0]["bar_ts"] == h1.index[150]
+        assert events[0]["stop"] == 90.0
+
+    def test_no_events_on_flat_data(self):
+        h1 = _bars(_utc(2024, 9, 1), timedelta(hours=1),
+                   _flat_rows(200, 100.0))
+        # A perfectly flat series never has a 'clear' period above the
+        # level (prior lows equal it), so no breach events.
+        assert find_level_cross_events(h1) == []
+
+    def test_dedupe_window_suppresses_clustered_breaches(self):
+        rows = _flat_rows(400, 100.0)
+        rows[100] = _ohlc(100, 100, 90.0, 100)
+        rows[150] = _ohlc(100, 100, 89.5, 95.0)
+        # Another qualifying breach 30h later (24h clear satisfied) but
+        # inside the 72h dedupe window -> suppressed.
+        rows[180] = _ohlc(100, 100, 89.0, 95.0)
+        h1 = _bars(_utc(2024, 9, 1), timedelta(hours=1), rows)
+        events = find_level_cross_events(h1, dedupe_hours=72)
+        assert len(events) == 1
+        # Without dedupe both breaches qualify.
+        assert len(find_level_cross_events(h1, dedupe_hours=1)) == 2
 
 
 class TestSummary:

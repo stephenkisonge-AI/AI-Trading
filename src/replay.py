@@ -383,3 +383,93 @@ def _exit_mix(trades: list[SimTrade]) -> dict:
         for reason in t.exit_reasons():
             mix[reason] = mix.get(reason, 0) + 1
     return mix
+
+
+# =========================================================================
+# Experiment 1 — stop-limit fill simulation on 1-minute bars
+# =========================================================================
+#
+# Production places SELL stop-limits with limit = stop * (1 - offset)
+# (ExecConfig.stop_limit_offset_pct, currently 0.005). If the market
+# sweeps through the whole band before the order rests/fills, the
+# position sits unprotected until the gap watchdog's next management
+# pass (swing-manager cadence: external cron every 15-30 min) closes it
+# at market. This simulator prices that trade-off per candidate offset.
+#
+# Fill model on 1m bars (can't see intra-minute sequencing; conservative):
+#   * trigger minute m0 = first minute of the event hour with low <= stop
+#   * low(m0) >  limit          -> filled within m0; the sweep stopped
+#       inside the band, so the fill is clamp(close(m0), limit, stop) —
+#       never better than the stop, never worse than the limit.
+#   * low(m0) <= limit but close(m0) >= limit -> price pierced the band
+#       and recovered within the minute; resting limit fills AT limit.
+#   * otherwise unfilled; it fills at limit on the first later minute
+#       whose high >= limit, else the watchdog market-closes at the
+#       open of the first minute at/after trigger + watchdog_min.
+
+def simulate_stop_limit(m1: pd.DataFrame, hour_start: datetime,
+                        stop: float, offset: float,
+                        watchdog_min: int) -> dict | None:
+    """Simulate one triggered stop-limit SELL. Returns None when the 1m
+    data shows no trigger inside the event hour (thin-feed gap)."""
+    limit = stop * (1.0 - offset)
+    window = m1[(m1.index >= hour_start) & (m1.index < hour_start + _1H)]
+    trig = window[window["low"] <= stop]
+    if trig.empty:
+        return None
+    t0 = trig.index[0]
+    bar0 = trig.iloc[0]
+    lo0, cl0 = float(bar0["low"]), float(bar0["close"])
+
+    def result(filled: bool, price: float, ts) -> dict:
+        return {"trigger_ts": t0, "filled_via_limit": filled,
+                "exit_price": price, "exit_ts": ts,
+                "slippage_pct": (stop - price) / stop}
+
+    if lo0 > limit:
+        return result(True, max(limit, min(stop, cl0)), t0)
+    if cl0 >= limit:
+        return result(True, limit, t0)
+
+    deadline = t0 + timedelta(minutes=watchdog_min)
+    after = m1[m1.index > t0]
+    for ts, bar in after.iterrows():
+        if ts >= deadline:
+            break
+        if float(bar["high"]) >= limit:
+            return result(True, limit, ts)
+
+    wd = m1[m1.index >= deadline]
+    if wd.empty:
+        # 1m data ends before the watchdog fires — best available proxy.
+        last = after.iloc[-1] if len(after) else bar0
+        last_ts = after.index[-1] if len(after) else t0
+        return result(False, float(last["close"]), last_ts)
+    return result(False, float(wd.iloc[0]["open"]), wd.index[0])
+
+
+def find_level_cross_events(h1: pd.DataFrame, lookback_hours: int = 80,
+                            exclude_recent: int = 4,
+                            clear_hours: int = 24,
+                            dedupe_hours: int = 24) -> list[dict]:
+    """Synthetic stop-trigger events for statistical power: first 1H
+    breach of a swing-low-like support level (the min low of
+    [t-lookback, t-exclude_recent)) that price had stayed clear of for
+    `clear_hours`. Mirrors where the strategy parks stops (below recent
+    structure) without needing a qualified entry, so fill mechanics can
+    be measured on hundreds of events instead of a handful of trades.
+    """
+    lows = h1["low"]
+    level = lows.rolling(lookback_hours - exclude_recent).min() \
+                .shift(exclude_recent)
+    prior_min = lows.rolling(clear_hours).min().shift(1)
+    crossed = (lows <= level) & (prior_min > level)
+    events: list[dict] = []
+    last_kept: datetime | None = None
+    for ts in h1.index[crossed.fillna(False)]:
+        if last_kept is not None and ts - last_kept < timedelta(
+                hours=dedupe_hours):
+            continue
+        last_kept = ts
+        events.append({"bar_ts": ts, "stop": float(level.loc[ts])})
+    return events
