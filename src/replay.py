@@ -18,6 +18,13 @@ Setup A entry variants can be compared on the same history:
              (reclaim_window_hit) records, promoted to a qualifying
              condition.
 
+Phase 7 extension: the same machinery replays Setup B (breakout
+retest) via evaluate_scan_b / replay_symbol(setup="B"). Setup B has a
+single variant — the production rule — booked under the "exact" key;
+its "window" book stays empty. The exit simulator is shared: the
+strategy doc's management rules (one stop, TP1/TP2 ladder, runner,
+time stop, regime exit) apply to both setups.
+
 Simulator assumptions (kept deliberately conservative, and identical
 for both variants so comparison bias mostly cancels):
   * Entry at the close of the signal 4H bar (production enters at
@@ -63,6 +70,7 @@ from src.strategy import (
     _find_swing_lows,
     classify_regime,
     evaluate_setup_a,
+    evaluate_setup_b,
 )
 
 # Production frame length: get_bars(limit=250) then drop the in-progress
@@ -157,6 +165,29 @@ def evaluate_scan(daily: pd.DataFrame, h4: pd.DataFrame,
         # cond7 passed for any qualification, so >= 2 swing lows exist
         # and the most recent one is the structural stop.
         sig.stop = _find_swing_lows(h4)[-1][1]
+    return sig
+
+
+def evaluate_scan_b(daily: pd.DataFrame, h4: pd.DataFrame,
+                    h1: pd.DataFrame, symbol: str,
+                    scan_ts: datetime) -> Signal:
+    """Run the production Setup B evaluator once (has_position=False —
+    the per-symbol book applies position state afterwards). Setup B has
+    no reclaim-window variant; `window` is always False. Entry, stop
+    (the breakout level) and ATR come straight off the evaluator.
+    """
+    result = evaluate_setup_b(daily, h4, h1, symbol, has_position=False)
+    sig = Signal(
+        symbol=symbol,
+        scan_ts=scan_ts,
+        regime=classify_regime(daily),
+        exact=bool(result["qualified"]),
+        window=False,
+    )
+    if sig.exact:
+        sig.entry = float(result["entry"])
+        sig.stop = float(result["stop"])
+        sig.atr = float(result["atr"])
     return sig
 
 
@@ -345,18 +376,22 @@ def simulate_trade(sig: Signal, variant: str, daily: pd.DataFrame,
 
 def replay_symbol(symbol: str, daily: pd.DataFrame, h4: pd.DataFrame,
                   h1: pd.DataFrame, start: datetime, end: datetime,
-                  progress=None) -> dict:
+                  progress=None, setup: str = "A") -> dict:
     """Evaluate every scan in [start, end] once, then run the two
     variants' books over the shared signal list. Returns
     {"signals": [Signal...], "trades": {"exact": [...], "window": [...]}}.
+    setup="A" replays evaluate_setup_a with both entry variants;
+    setup="B" replays evaluate_setup_b (single variant under "exact",
+    the "window" book stays empty).
     """
+    evaluate = evaluate_scan if setup == "A" else evaluate_scan_b
     signals: list[Signal] = []
     for i, ts in enumerate(scan_times(start, end)):
         sliced = frames_at(daily, h4, h1, ts)
         if sliced is None:
             continue
         d, h4_s, h1_s = sliced
-        signals.append(evaluate_scan(d, h4_s, h1_s, symbol, ts))
+        signals.append(evaluate(d, h4_s, h1_s, symbol, ts))
         if progress and i % 200 == 0:
             progress(symbol, ts)
 

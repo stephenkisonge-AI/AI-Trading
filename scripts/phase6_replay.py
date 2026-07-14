@@ -3,12 +3,16 @@
 Usage:
     python scripts/phase6_replay.py [--start 2024-01-01] [--end 2026-07-13]
         [--symbols BTC/USD,ETH/USD,...] [--cache-dir .replay_cache]
-        [--out docs/phase6/experiment2_results.json]
+        [--setup A|B] [--out docs/phase6/experiment2_results.json]
 
 Fetches daily/4H/1H history (with local CSV caching), replays every
 4-hourly scan through the production Setup A evaluator, runs both entry
 variants' per-symbol books, and writes a JSON results file plus a
 printed summary. Analysis only — no orders, no state-repo writes.
+
+--setup B (Phase 7) replays the production Setup B evaluator instead:
+one variant, booked under "exact"; default output moves to
+docs/phase6/setup_b_results.json so Experiment 2's results survive.
 """
 from __future__ import annotations
 
@@ -99,8 +103,13 @@ def main(argv=None) -> int:
     parser.add_argument("--end", default=None)
     parser.add_argument("--symbols", default=",".join(CRYPTO_SYMBOLS))
     parser.add_argument("--cache-dir", default=".replay_cache")
-    parser.add_argument("--out", default="docs/phase6/experiment2_results.json")
+    parser.add_argument("--setup", choices=("A", "B"), default="A")
+    parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
+    if args.out is None:
+        args.out = ("docs/phase6/experiment2_results.json" if args.setup == "A"
+                    else "docs/phase6/setup_b_results.json")
+    variants = ("exact", "window") if args.setup == "A" else ("exact",)
 
     load_dotenv()
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
@@ -110,8 +119,8 @@ def main(argv=None) -> int:
     cache_dir = Path(args.cache_dir)
 
     results = {"start": str(start), "end": str(end), "symbols": symbols,
-               "per_symbol": {}, "combined": {}}
-    all_trades: dict[str, list[SimTrade]] = {"exact": [], "window": []}
+               "setup": args.setup, "per_symbol": {}, "combined": {}}
+    all_trades: dict[str, list[SimTrade]] = {v: [] for v in variants}
     all_stop_hits: list[dict] = []
     signal_counts = {"exact": 0, "window": 0, "window_only": 0, "scans": 0}
 
@@ -129,7 +138,8 @@ def main(argv=None) -> int:
         out = replay_symbol(
             symbol, daily, h4, h1, start, end,
             progress=lambda sym, ts: print(f"[replay]   {sym} @ {ts:%Y-%m-%d}",
-                                           flush=True))
+                                           flush=True),
+            setup=args.setup)
         sigs = out["signals"]
         signal_counts["scans"] += len(sigs)
         signal_counts["exact"] += sum(s.exact for s in sigs)
@@ -138,7 +148,7 @@ def main(argv=None) -> int:
             s.window and not s.exact for s in sigs)
 
         sym_result = {"scans": len(sigs)}
-        for variant in ("exact", "window"):
+        for variant in variants:
             trades = out["trades"][variant]
             all_trades[variant].extend(trades)
             sym_result[variant] = {
@@ -149,11 +159,13 @@ def main(argv=None) -> int:
             for t in trades:
                 all_stop_hits.extend(t.stop_hits)
         results["per_symbol"][symbol] = sym_result
-        print(f"[replay] {symbol}: exact={sym_result['exact']['signals']} "
-              f"window={sym_result['window']['signals']} signals", flush=True)
+        counts_msg = f"[replay] {symbol}: exact={sym_result['exact']['signals']}"
+        if "window" in sym_result:
+            counts_msg += f" window={sym_result['window']['signals']}"
+        print(counts_msg + " signals", flush=True)
 
     results["signal_counts"] = signal_counts
-    for variant in ("exact", "window"):
+    for variant in variants:
         results["combined"][variant] = summarize_trades(all_trades[variant])
     results["stop_hits"] = all_stop_hits
 
@@ -162,13 +174,16 @@ def main(argv=None) -> int:
     out_path.write_text(json.dumps(results, indent=1, default=str))
     print(f"\n[replay] results written to {out_path}")
 
-    print(f"\n=== EXPERIMENT 2 SUMMARY "
+    header = ("EXPERIMENT 2 SUMMARY" if args.setup == "A"
+              else "SETUP B REPLAY SUMMARY")
+    print(f"\n=== {header} "
           f"({start:%Y-%m-%d} .. {end:%Y-%m-%d}) ===")
     print(f"scans evaluated:      {signal_counts['scans']}")
     print(f"exact signals:        {signal_counts['exact']}")
-    print(f"window signals:       {signal_counts['window']} "
-          f"(+{signal_counts['window_only']} only via window)")
-    for variant in ("exact", "window"):
+    if args.setup == "A":
+        print(f"window signals:       {signal_counts['window']} "
+              f"(+{signal_counts['window_only']} only via window)")
+    for variant in variants:
         s = results["combined"][variant]
         print(f"\n--- variant {variant.upper()} ---")
         if s["n"] == 0:

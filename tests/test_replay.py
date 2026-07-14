@@ -11,6 +11,7 @@ from src.replay import (
     FRAME_LEN,
     Signal,
     evaluate_scan,
+    evaluate_scan_b,
     find_level_cross_events,
     frames_at,
     scan_times,
@@ -165,6 +166,74 @@ class TestVariantDerivation:
             lambda *a, **k: _canned_result(False, False, True, None))
         sig = evaluate_scan(daily, h4, h1, "BTC/USD", t)
         assert not sig.exact and not sig.window
+
+
+# =========================================================================
+# Setup B scan derivation (production evaluator stubbed, as above — its
+# own behavior is covered by the strategy tests)
+# =========================================================================
+
+def _canned_b_result(qualified: bool, entry=None, stop=None,
+                     atr=None) -> dict:
+    return {"qualified": qualified, "conditions": [], "entry": entry,
+            "stop": stop, "atr": atr, "telemetry": {}}
+
+
+class TestSetupBScan:
+    @pytest.fixture()
+    def frames(self):
+        t = _utc(2024, 9, 1, 12)
+        daily = _bars(t - timedelta(days=260), timedelta(days=1),
+                      _flat_rows(260, 100.0))
+        h4 = _bars(t - timedelta(hours=4 * 40), timedelta(hours=4),
+                   _flat_rows(40, 100.0))
+        h1 = _bars(t - timedelta(hours=60), timedelta(hours=1),
+                   _flat_rows(60, 100.0))
+        return daily, h4, h1, t
+
+    def test_qualified_signal_uses_evaluator_prices(self, frames,
+                                                    monkeypatch):
+        daily, h4, h1, t = frames
+        monkeypatch.setattr(
+            replay, "evaluate_setup_b",
+            lambda *a, **k: _canned_b_result(True, entry=100.0, stop=97.0,
+                                             atr=2.0))
+        sig = evaluate_scan_b(daily, h4, h1, "BTC/USD", t)
+        assert sig.exact and not sig.window
+        assert (sig.entry, sig.stop, sig.atr) == (100.0, 97.0, 2.0)
+
+    def test_unqualified_signal_has_no_prices(self, frames, monkeypatch):
+        daily, h4, h1, t = frames
+        monkeypatch.setattr(replay, "evaluate_setup_b",
+                            lambda *a, **k: _canned_b_result(False))
+        sig = evaluate_scan_b(daily, h4, h1, "BTC/USD", t)
+        assert not sig.exact and not sig.window
+        assert sig.entry is None and sig.stop is None
+
+    def test_replay_symbol_setup_b_routes_to_b_evaluator(self, monkeypatch):
+        t0 = _utc(2024, 9, 1, 0)
+        daily = _bars(t0 - timedelta(days=260), timedelta(days=1),
+                      _flat_rows(260, 100.0))
+        h4 = _bars(t0 - timedelta(hours=4 * 300), timedelta(hours=4),
+                   _flat_rows(300, 100.0))
+        h1 = _bars(t0 - timedelta(hours=300), timedelta(hours=1),
+                   _flat_rows(300, 100.0))
+        calls: list[str] = []
+
+        def fake_b(daily, h4, h1, symbol, has_position):
+            calls.append(symbol)
+            return _canned_b_result(True, entry=100.0, stop=97.0, atr=2.0)
+
+        monkeypatch.setattr(replay, "evaluate_setup_b", fake_b)
+        out = replay.replay_symbol("BTC/USD", daily, h4, h1, t0, t0,
+                                   setup="B")
+        assert calls == ["BTC/USD"]
+        assert len(out["signals"]) == 1
+        assert out["trades"]["window"] == []
+        trades = out["trades"]["exact"]
+        assert len(trades) == 1
+        assert trades[0].stop0 == 97.0
+        assert trades[0].entry == 100.0
 
 
 # =========================================================================

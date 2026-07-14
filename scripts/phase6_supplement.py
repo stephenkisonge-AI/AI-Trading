@@ -91,6 +91,9 @@ def main(argv=None) -> int:
     parser.add_argument("--end", default=None)
     parser.add_argument("--cache-dir", default=".replay_cache")
     parser.add_argument("--out", default="docs/phase6/supplement_results.json")
+    parser.add_argument("--variant", default="window",
+                        help="which variant's fee rows to print "
+                             "(window for Experiment 2, exact for Setup B)")
     args = parser.parse_args(argv)
 
     load_dotenv()
@@ -169,7 +172,7 @@ def main(argv=None) -> int:
 
     print("\n=== FEE DRAG vs STOP DISTANCE (conservative model) ===")
     rows = [r for r in fee_rows
-            if r["model"] == "conservative" and r["variant"] == "window"]
+            if r["model"] == "conservative" and r["variant"] == args.variant]
     for r in sorted(rows, key=lambda x: x["stop_distance_pct"]):
         print(f"  {r['symbol']:>9} {r['signal_ts'][:16]} "
               f"stop_dist={r['stop_distance_pct']:>5.2f}% "
