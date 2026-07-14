@@ -206,7 +206,8 @@ improving the mean. **Recommendation: keep 0.005; no code change.**
    is not enough), or retire Setup A and rely on Setup B. Note Setup
    B was NOT replayed (Phase 6's mandate covered Setup A's Variant B
    and the stop offset); replaying it through this harness is cheap
-   and should precede any reliance on it.
+   and should precede any reliance on it. *(Done 2026-07-14 — see
+   PHASE7_SETUP_B_REPLAY.md.)*
 4. **Re-test:** whatever rework is chosen, re-run this harness (one
    command per experiment) before touching any production rule.
 5. **Continue Phase 5 telemetry** — live funnel data agrees with the

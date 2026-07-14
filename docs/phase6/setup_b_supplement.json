@@ -1,0 +1,2427 @@
+{
+ "start": "2024-01-01 00:00:00+00:00",
+ "end": "2026-07-13 00:00:00+00:00",
+ "sensitivity": {
+  "exact": {
+   "conservative": {
+    "n": 85,
+    "n_truncated": 0,
+    "win_rate": 0.2,
+    "mean_r_net": -3.8802262511294394,
+    "mean_r_gross": -0.1926770738533178,
+    "total_r_net": -329.81923134600237,
+    "best_r": 6.005338367978741,
+    "worst_r": -67.50186079548067,
+    "expectancy_complete_only": -3.8802262511294394,
+    "exit_mix": {
+     "tp1": 25,
+     "tp2": 16,
+     "stop": 83,
+     "stop_gap_open": 2
+    }
+   },
+   "optimistic": {
+    "n": 85,
+    "n_truncated": 0,
+    "win_rate": 0.2235294117647059,
+    "mean_r_net": -3.5651347401975273,
+    "mean_r_gross": 0.1232041401135114,
+    "total_r_net": -303.0364529167898,
+    "best_r": 2.8072205690272143,
+    "worst_r": -65.00811079548131,
+    "expectancy_complete_only": -3.5651347401975273,
+    "exit_mix": {
+     "tp1": 45,
+     "tp2": 21,
+     "stop": 83,
+     "stop_gap_open": 2
+    }
+   }
+  },
+  "window": {
+   "conservative": {
+    "n": 0
+   },
+   "optimistic": {
+    "n": 0
+   }
+  }
+ },
+ "fee_rows": [
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-01-29 20:00:00+00:00",
+   "stop_distance_pct": 0.3479417560146975,
+   "r_gross": 1.5,
+   "r_net": 0.059,
+   "fee_drag_r": 1.441,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-04-22 20:00:00+00:00",
+   "stop_distance_pct": 0.04562281906966248,
+   "r_gross": -1.268,
+   "r_net": -12.225,
+   "fee_drag_r": 10.956,
+   "exits": [
+    "stop_gap_open"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-07-11 12:00:00+00:00",
+   "stop_distance_pct": 0.5606575872178123,
+   "r_gross": -1.0,
+   "r_net": -1.889,
+   "fee_drag_r": 0.889,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-07-20 00:00:00+00:00",
+   "stop_distance_pct": 0.8574140528854709,
+   "r_gross": 0.75,
+   "r_net": 0.165,
+   "fee_drag_r": 0.585,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-20 04:00:00+00:00",
+   "stop_distance_pct": 0.6744155278374101,
+   "r_gross": -1.0,
+   "r_net": -1.739,
+   "fee_drag_r": 0.739,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-24 04:00:00+00:00",
+   "stop_distance_pct": 0.028523377439356918,
+   "r_gross": 1.5,
+   "r_net": -16.033,
+   "fee_drag_r": 17.533,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 00:00:00+00:00",
+   "stop_distance_pct": 0.5146857432906684,
+   "r_gross": -1.0,
+   "r_net": -1.969,
+   "fee_drag_r": 0.969,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 08:00:00+00:00",
+   "stop_distance_pct": 0.04272654797191189,
+   "r_gross": -1.0,
+   "r_net": -12.7,
+   "fee_drag_r": 11.7,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 12:00:00+00:00",
+   "stop_distance_pct": 0.08176055703863233,
+   "r_gross": -1.0,
+   "r_net": -7.113,
+   "fee_drag_r": 6.113,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-11-19 20:00:00+00:00",
+   "stop_distance_pct": 0.5977544850732213,
+   "r_gross": -1.0,
+   "r_net": -1.834,
+   "fee_drag_r": 0.834,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-11-20 08:00:00+00:00",
+   "stop_distance_pct": 0.15862003154542142,
+   "r_gross": 9.18,
+   "r_net": 6.005,
+   "fee_drag_r": 3.175,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-12-05 00:00:00+00:00",
+   "stop_distance_pct": 0.574770433435479,
+   "r_gross": -1.0,
+   "r_net": -1.867,
+   "fee_drag_r": 0.867,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-12-15 20:00:00+00:00",
+   "stop_distance_pct": 0.015981991680130658,
+   "r_gross": -3.913,
+   "r_net": -35.189,
+   "fee_drag_r": 31.275,
+   "exits": [
+    "stop_gap_open"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-14 16:00:00+00:00",
+   "stop_distance_pct": 0.6474906962220152,
+   "r_gross": -1.0,
+   "r_net": -1.77,
+   "fee_drag_r": 0.77,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-14 20:00:00+00:00",
+   "stop_distance_pct": 0.6983689733346138,
+   "r_gross": 2.064,
+   "r_net": 1.343,
+   "fee_drag_r": 0.721,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-18 16:00:00+00:00",
+   "stop_distance_pct": 0.22508711110137036,
+   "r_gross": -1.0,
+   "r_net": -3.219,
+   "fee_drag_r": 2.219,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-18 20:00:00+00:00",
+   "stop_distance_pct": 0.008293285587656461,
+   "r_gross": -1.0,
+   "r_net": -61.287,
+   "fee_drag_r": 60.287,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 00:00:00+00:00",
+   "stop_distance_pct": 0.16592638859146,
+   "r_gross": -1.0,
+   "r_net": -4.011,
+   "fee_drag_r": 3.011,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 04:00:00+00:00",
+   "stop_distance_pct": 0.5811372532857879,
+   "r_gross": -1.0,
+   "r_net": -1.858,
+   "fee_drag_r": 0.858,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 08:00:00+00:00",
+   "stop_distance_pct": 0.7321513365933315,
+   "r_gross": -1.0,
+   "r_net": -1.68,
+   "fee_drag_r": 0.68,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-21 20:00:00+00:00",
+   "stop_distance_pct": 0.7406577514940867,
+   "r_gross": -1.0,
+   "r_net": -1.673,
+   "fee_drag_r": 0.673,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-04-02 16:00:00+00:00",
+   "stop_distance_pct": 1.3379677104776277,
+   "r_gross": -1.0,
+   "r_net": -1.371,
+   "fee_drag_r": 0.371,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-04-12 16:00:00+00:00",
+   "stop_distance_pct": 0.8468337799734154,
+   "r_gross": -1.0,
+   "r_net": -1.588,
+   "fee_drag_r": 0.588,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-05-01 12:00:00+00:00",
+   "stop_distance_pct": 0.619858637615606,
+   "r_gross": 0.75,
+   "r_net": -0.059,
+   "fee_drag_r": 0.809,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-05-02 12:00:00+00:00",
+   "stop_distance_pct": 0.6084251620967039,
+   "r_gross": -1.0,
+   "r_net": -1.819,
+   "fee_drag_r": 0.819,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-09 12:00:00+00:00",
+   "stop_distance_pct": 1.2062747228067987,
+   "r_gross": 0.75,
+   "r_net": 0.334,
+   "fee_drag_r": 0.416,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-16 20:00:00+00:00",
+   "stop_distance_pct": 0.721750887808989,
+   "r_gross": -1.0,
+   "r_net": -1.69,
+   "fee_drag_r": 0.69,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-25 12:00:00+00:00",
+   "stop_distance_pct": 0.3086261771722395,
+   "r_gross": 0.75,
+   "r_net": -0.872,
+   "fee_drag_r": 1.622,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-07-02 20:00:00+00:00",
+   "stop_distance_pct": 0.7824938546955361,
+   "r_gross": -1.0,
+   "r_net": -1.636,
+   "fee_drag_r": 0.636,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-07-03 08:00:00+00:00",
+   "stop_distance_pct": 0.44199657906444667,
+   "r_gross": -1.0,
+   "r_net": -2.129,
+   "fee_drag_r": 1.129,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-03 00:00:00+00:00",
+   "stop_distance_pct": 0.41938450627692286,
+   "r_gross": -1.0,
+   "r_net": -2.19,
+   "fee_drag_r": 1.19,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-03 08:00:00+00:00",
+   "stop_distance_pct": 0.2802728252299344,
+   "r_gross": 1.5,
+   "r_net": -0.288,
+   "fee_drag_r": 1.788,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-10 20:00:00+00:00",
+   "stop_distance_pct": 0.2470270277407072,
+   "r_gross": 0.75,
+   "r_net": -1.276,
+   "fee_drag_r": 2.026,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-16 20:00:00+00:00",
+   "stop_distance_pct": 0.07476153648950552,
+   "r_gross": -1.0,
+   "r_net": -7.685,
+   "fee_drag_r": 6.685,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-18 16:00:00+00:00",
+   "stop_distance_pct": 0.1821296682750991,
+   "r_gross": -1.0,
+   "r_net": -3.743,
+   "fee_drag_r": 2.743,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-10-26 12:00:00+00:00",
+   "stop_distance_pct": 1.1063061684957702,
+   "r_gross": 0.75,
+   "r_net": 0.296,
+   "fee_drag_r": 0.454,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-01-09 04:00:00+00:00",
+   "stop_distance_pct": 1.171341909298991,
+   "r_gross": -1.0,
+   "r_net": -1.424,
+   "fee_drag_r": 0.424,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-01-10 12:00:00+00:00",
+   "stop_distance_pct": 0.06372130772272071,
+   "r_gross": -1.0,
+   "r_net": -8.844,
+   "fee_drag_r": 7.844,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-02-06 16:00:00+00:00",
+   "stop_distance_pct": 0.007518303973143032,
+   "r_gross": -1.0,
+   "r_net": -67.502,
+   "fee_drag_r": 66.502,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-02-06 20:00:00+00:00",
+   "stop_distance_pct": 1.338932591343345,
+   "r_gross": 2.029,
+   "r_net": 1.65,
+   "fee_drag_r": 0.379,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-03-11 12:00:00+00:00",
+   "stop_distance_pct": 0.5487357643397326,
+   "r_gross": -1.0,
+   "r_net": -1.909,
+   "fee_drag_r": 0.909,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-03-26 04:00:00+00:00",
+   "stop_distance_pct": 1.0418359085686923,
+   "r_gross": -1.0,
+   "r_net": -1.477,
+   "fee_drag_r": 0.477,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-05-15 20:00:00+00:00",
+   "stop_distance_pct": 1.129536673161391,
+   "r_gross": -1.0,
+   "r_net": -1.44,
+   "fee_drag_r": 0.44,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-07-29 08:00:00+00:00",
+   "stop_distance_pct": 0.40975598747362313,
+   "r_gross": 0.75,
+   "r_net": -0.472,
+   "fee_drag_r": 1.222,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-12-04 20:00:00+00:00",
+   "stop_distance_pct": 2.1836368150936147,
+   "r_gross": -1.0,
+   "r_net": -1.226,
+   "fee_drag_r": 0.226,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-12-17 04:00:00+00:00",
+   "stop_distance_pct": 0.37772768929730266,
+   "r_gross": -1.0,
+   "r_net": -2.321,
+   "fee_drag_r": 1.321,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 0.5719517558088483,
+   "r_gross": -1.0,
+   "r_net": -1.872,
+   "fee_drag_r": 0.872,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-04 04:00:00+00:00",
+   "stop_distance_pct": 0.7093759322260919,
+   "r_gross": 0.75,
+   "r_net": 0.043,
+   "fee_drag_r": 0.707,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-24 12:00:00+00:00",
+   "stop_distance_pct": 0.9934306365476537,
+   "r_gross": -1.0,
+   "r_net": -1.501,
+   "fee_drag_r": 0.501,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-31 16:00:00+00:00",
+   "stop_distance_pct": 2.5996912277671407,
+   "r_gross": -1.0,
+   "r_net": -1.19,
+   "fee_drag_r": 0.19,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-07-27 16:00:00+00:00",
+   "stop_distance_pct": 0.20863707204264026,
+   "r_gross": -1.0,
+   "r_net": -3.394,
+   "fee_drag_r": 2.394,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-08-07 12:00:00+00:00",
+   "stop_distance_pct": 2.50573069382334,
+   "r_gross": 2.384,
+   "r_net": 2.179,
+   "fee_drag_r": 0.206,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-09-11 04:00:00+00:00",
+   "stop_distance_pct": 0.5515579519738344,
+   "r_gross": -1.0,
+   "r_net": -1.904,
+   "fee_drag_r": 0.904,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-09-29 20:00:00+00:00",
+   "stop_distance_pct": 1.0041224127565807,
+   "r_gross": -1.0,
+   "r_net": -1.495,
+   "fee_drag_r": 0.495,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-10-26 16:00:00+00:00",
+   "stop_distance_pct": 0.5921125541247669,
+   "r_gross": -1.0,
+   "r_net": -1.842,
+   "fee_drag_r": 0.842,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-10-26 20:00:00+00:00",
+   "stop_distance_pct": 0.3788171373590551,
+   "r_gross": 2.546,
+   "r_net": 1.22,
+   "fee_drag_r": 1.326,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-11-10 00:00:00+00:00",
+   "stop_distance_pct": 0.040276402745040775,
+   "r_gross": -1.0,
+   "r_net": -13.412,
+   "fee_drag_r": 12.412,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2024-11-23 16:00:00+00:00",
+   "stop_distance_pct": 0.2284726888739665,
+   "r_gross": -1.0,
+   "r_net": -3.186,
+   "fee_drag_r": 2.186,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 0.9429966685858214,
+   "r_gross": -1.0,
+   "r_net": -1.528,
+   "fee_drag_r": 0.528,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-01-15 20:00:00+00:00",
+   "stop_distance_pct": 1.959765036128288,
+   "r_gross": 4.11,
+   "r_net": 3.844,
+   "fee_drag_r": 0.265,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-22 20:00:00+00:00",
+   "stop_distance_pct": 1.7800924994972775,
+   "r_gross": -1.0,
+   "r_net": -1.278,
+   "fee_drag_r": 0.278,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-23 16:00:00+00:00",
+   "stop_distance_pct": 0.123547319067621,
+   "r_gross": -1.0,
+   "r_net": -5.045,
+   "fee_drag_r": 4.045,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-23 20:00:00+00:00",
+   "stop_distance_pct": 0.9047572387438277,
+   "r_gross": 1.5,
+   "r_net": 0.944,
+   "fee_drag_r": 0.556,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-09-08 12:00:00+00:00",
+   "stop_distance_pct": 2.015600431747641,
+   "r_gross": 3.063,
+   "r_net": 2.807,
+   "fee_drag_r": 0.256,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-10-26 20:00:00+00:00",
+   "stop_distance_pct": 0.5506072901892206,
+   "r_gross": -1.0,
+   "r_net": -1.906,
+   "fee_drag_r": 0.906,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-01-02 04:00:00+00:00",
+   "stop_distance_pct": 0.3025386524145899,
+   "r_gross": 1.5,
+   "r_net": -0.156,
+   "fee_drag_r": 1.656,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-01-15 12:00:00+00:00",
+   "stop_distance_pct": 1.352267638968844,
+   "r_gross": -1.0,
+   "r_net": -1.367,
+   "fee_drag_r": 0.367,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-02-29 08:00:00+00:00",
+   "stop_distance_pct": 2.24704245088028,
+   "r_gross": -1.0,
+   "r_net": -1.22,
+   "fee_drag_r": 0.22,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-02-29 20:00:00+00:00",
+   "stop_distance_pct": 0.6337041817491459,
+   "r_gross": -1.0,
+   "r_net": -1.787,
+   "fee_drag_r": 0.787,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-03-25 16:00:00+00:00",
+   "stop_distance_pct": 1.4545230538302336,
+   "r_gross": 1.91,
+   "r_net": 1.562,
+   "fee_drag_r": 0.349,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-04 00:00:00+00:00",
+   "stop_distance_pct": 0.3173812931731879,
+   "r_gross": 0.75,
+   "r_net": -0.827,
+   "fee_drag_r": 1.577,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-04 04:00:00+00:00",
+   "stop_distance_pct": 0.0332847930101898,
+   "r_gross": -1.0,
+   "r_net": -16.019,
+   "fee_drag_r": 15.019,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-12 16:00:00+00:00",
+   "stop_distance_pct": 3.0722891566264967,
+   "r_gross": -1.0,
+   "r_net": -1.16,
+   "fee_drag_r": 0.16,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-13 00:00:00+00:00",
+   "stop_distance_pct": 6.111198830208627,
+   "r_gross": -1.0,
+   "r_net": -1.079,
+   "fee_drag_r": 0.079,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-01-20 08:00:00+00:00",
+   "stop_distance_pct": 1.4247959817059344,
+   "r_gross": -1.0,
+   "r_net": -1.348,
+   "fee_drag_r": 0.348,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-02-11 08:00:00+00:00",
+   "stop_distance_pct": 1.3002433338004686,
+   "r_gross": -1.0,
+   "r_net": -1.382,
+   "fee_drag_r": 0.382,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-02-11 12:00:00+00:00",
+   "stop_distance_pct": 0.9175109796930188,
+   "r_gross": -1.0,
+   "r_net": -1.542,
+   "fee_drag_r": 0.542,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-08-17 12:00:00+00:00",
+   "stop_distance_pct": 0.5747126436781588,
+   "r_gross": -1.0,
+   "r_net": -1.868,
+   "fee_drag_r": 0.868,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-09-09 08:00:00+00:00",
+   "stop_distance_pct": 1.6469376979936692,
+   "r_gross": -1.0,
+   "r_net": -1.301,
+   "fee_drag_r": 0.301,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-10-27 04:00:00+00:00",
+   "stop_distance_pct": 1.4440833210222974,
+   "r_gross": -1.0,
+   "r_net": -1.344,
+   "fee_drag_r": 0.344,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-01-09 08:00:00+00:00",
+   "stop_distance_pct": 1.208069086493059,
+   "r_gross": -1.0,
+   "r_net": -1.411,
+   "fee_drag_r": 0.411,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-01-11 08:00:00+00:00",
+   "stop_distance_pct": 2.035868136444685,
+   "r_gross": 1.5,
+   "r_net": 1.251,
+   "fee_drag_r": 0.249,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-03-11 12:00:00+00:00",
+   "stop_distance_pct": 4.683914267157392,
+   "r_gross": 2.268,
+   "r_net": 2.156,
+   "fee_drag_r": 0.112,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-04-08 20:00:00+00:00",
+   "stop_distance_pct": 0.6198444237507286,
+   "r_gross": -1.0,
+   "r_net": -1.804,
+   "fee_drag_r": 0.804,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2025-01-02 08:00:00+00:00",
+   "stop_distance_pct": 0.5071904585841638,
+   "r_gross": 1.5,
+   "r_net": 0.51,
+   "fee_drag_r": 0.99,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-01-29 20:00:00+00:00",
+   "stop_distance_pct": 0.3479417560146975,
+   "r_gross": 1.5,
+   "r_net": 0.059,
+   "fee_drag_r": 1.441,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-04-22 20:00:00+00:00",
+   "stop_distance_pct": 0.04562281906966248,
+   "r_gross": -1.268,
+   "r_net": -12.225,
+   "fee_drag_r": 10.956,
+   "exits": [
+    "stop_gap_open"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-07-11 12:00:00+00:00",
+   "stop_distance_pct": 0.5606575872178123,
+   "r_gross": 0.75,
+   "r_net": -0.144,
+   "fee_drag_r": 0.894,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-07-20 00:00:00+00:00",
+   "stop_distance_pct": 0.8574140528854709,
+   "r_gross": 0.75,
+   "r_net": 0.165,
+   "fee_drag_r": 0.585,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-20 04:00:00+00:00",
+   "stop_distance_pct": 0.6744155278374101,
+   "r_gross": 0.75,
+   "r_net": 0.007,
+   "fee_drag_r": 0.743,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-24 04:00:00+00:00",
+   "stop_distance_pct": 0.028523377439356918,
+   "r_gross": 1.5,
+   "r_net": -16.033,
+   "fee_drag_r": 17.533,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 00:00:00+00:00",
+   "stop_distance_pct": 0.5146857432906684,
+   "r_gross": -1.0,
+   "r_net": -1.969,
+   "fee_drag_r": 0.969,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 08:00:00+00:00",
+   "stop_distance_pct": 0.04272654797191189,
+   "r_gross": 1.5,
+   "r_net": -10.206,
+   "fee_drag_r": 11.706,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-08-25 12:00:00+00:00",
+   "stop_distance_pct": 0.08176055703863233,
+   "r_gross": -1.0,
+   "r_net": -7.113,
+   "fee_drag_r": 6.113,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-11-19 20:00:00+00:00",
+   "stop_distance_pct": 0.5977544850732213,
+   "r_gross": -1.0,
+   "r_net": -1.834,
+   "fee_drag_r": 0.834,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-11-20 08:00:00+00:00",
+   "stop_distance_pct": 0.15862003154542142,
+   "r_gross": 1.5,
+   "r_net": -1.656,
+   "fee_drag_r": 3.156,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-12-05 00:00:00+00:00",
+   "stop_distance_pct": 0.574770433435479,
+   "r_gross": -1.0,
+   "r_net": -1.867,
+   "fee_drag_r": 0.867,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2024-12-15 20:00:00+00:00",
+   "stop_distance_pct": 0.015981991680130658,
+   "r_gross": -3.913,
+   "r_net": -35.189,
+   "fee_drag_r": 31.275,
+   "exits": [
+    "stop_gap_open"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-14 16:00:00+00:00",
+   "stop_distance_pct": 0.6474906962220152,
+   "r_gross": -1.0,
+   "r_net": -1.77,
+   "fee_drag_r": 0.77,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-14 20:00:00+00:00",
+   "stop_distance_pct": 0.6983689733346138,
+   "r_gross": 0.75,
+   "r_net": 0.032,
+   "fee_drag_r": 0.718,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-18 16:00:00+00:00",
+   "stop_distance_pct": 0.22508711110137036,
+   "r_gross": -1.0,
+   "r_net": -3.219,
+   "fee_drag_r": 2.219,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-18 20:00:00+00:00",
+   "stop_distance_pct": 0.008293285587656461,
+   "r_gross": 1.5,
+   "r_net": -58.793,
+   "fee_drag_r": 60.293,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 00:00:00+00:00",
+   "stop_distance_pct": 0.16592638859146,
+   "r_gross": -1.0,
+   "r_net": -4.011,
+   "fee_drag_r": 3.011,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 04:00:00+00:00",
+   "stop_distance_pct": 0.5811372532857879,
+   "r_gross": -1.0,
+   "r_net": -1.858,
+   "fee_drag_r": 0.858,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-19 08:00:00+00:00",
+   "stop_distance_pct": 0.7321513365933315,
+   "r_gross": -1.0,
+   "r_net": -1.68,
+   "fee_drag_r": 0.68,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-01-21 20:00:00+00:00",
+   "stop_distance_pct": 0.7406577514940867,
+   "r_gross": -1.0,
+   "r_net": -1.673,
+   "fee_drag_r": 0.673,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-04-02 16:00:00+00:00",
+   "stop_distance_pct": 1.3379677104776277,
+   "r_gross": 0.75,
+   "r_net": 0.374,
+   "fee_drag_r": 0.376,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-04-12 16:00:00+00:00",
+   "stop_distance_pct": 0.8468337799734154,
+   "r_gross": 0.75,
+   "r_net": 0.158,
+   "fee_drag_r": 0.592,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-05-01 12:00:00+00:00",
+   "stop_distance_pct": 0.619858637615606,
+   "r_gross": 0.75,
+   "r_net": -0.059,
+   "fee_drag_r": 0.809,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-05-02 12:00:00+00:00",
+   "stop_distance_pct": 0.6084251620967039,
+   "r_gross": 0.75,
+   "r_net": -0.074,
+   "fee_drag_r": 0.824,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-09 12:00:00+00:00",
+   "stop_distance_pct": 1.2062747228067987,
+   "r_gross": 0.75,
+   "r_net": 0.334,
+   "fee_drag_r": 0.416,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-16 20:00:00+00:00",
+   "stop_distance_pct": 0.721750887808989,
+   "r_gross": -1.0,
+   "r_net": -1.69,
+   "fee_drag_r": 0.69,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-06-25 12:00:00+00:00",
+   "stop_distance_pct": 0.3086261771722395,
+   "r_gross": 0.75,
+   "r_net": -0.872,
+   "fee_drag_r": 1.622,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-07-02 20:00:00+00:00",
+   "stop_distance_pct": 0.7824938546955361,
+   "r_gross": -1.0,
+   "r_net": -1.636,
+   "fee_drag_r": 0.636,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-07-03 08:00:00+00:00",
+   "stop_distance_pct": 0.44199657906444667,
+   "r_gross": 0.75,
+   "r_net": -0.383,
+   "fee_drag_r": 1.133,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-03 00:00:00+00:00",
+   "stop_distance_pct": 0.41938450627692286,
+   "r_gross": -1.0,
+   "r_net": -2.19,
+   "fee_drag_r": 1.19,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-03 08:00:00+00:00",
+   "stop_distance_pct": 0.2802728252299344,
+   "r_gross": 0.75,
+   "r_net": -1.036,
+   "fee_drag_r": 1.786,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-10 20:00:00+00:00",
+   "stop_distance_pct": 0.2470270277407072,
+   "r_gross": 1.5,
+   "r_net": -0.528,
+   "fee_drag_r": 2.028,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-16 20:00:00+00:00",
+   "stop_distance_pct": 0.07476153648950552,
+   "r_gross": 0.75,
+   "r_net": -5.94,
+   "fee_drag_r": 6.69,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-09-18 16:00:00+00:00",
+   "stop_distance_pct": 0.1821296682750991,
+   "r_gross": -1.0,
+   "r_net": -3.743,
+   "fee_drag_r": 2.743,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BTC/USD",
+   "signal_ts": "2025-10-26 12:00:00+00:00",
+   "stop_distance_pct": 1.1063061684957702,
+   "r_gross": 0.75,
+   "r_net": 0.296,
+   "fee_drag_r": 0.454,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-01-09 04:00:00+00:00",
+   "stop_distance_pct": 1.171341909298991,
+   "r_gross": -1.0,
+   "r_net": -1.424,
+   "fee_drag_r": 0.424,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-01-10 12:00:00+00:00",
+   "stop_distance_pct": 0.06372130772272071,
+   "r_gross": 1.5,
+   "r_net": -6.35,
+   "fee_drag_r": 7.85,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-02-06 16:00:00+00:00",
+   "stop_distance_pct": 0.007518303973143032,
+   "r_gross": 1.5,
+   "r_net": -65.008,
+   "fee_drag_r": 66.508,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-02-06 20:00:00+00:00",
+   "stop_distance_pct": 1.338932591343345,
+   "r_gross": 2.029,
+   "r_net": 1.65,
+   "fee_drag_r": 0.379,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-03-11 12:00:00+00:00",
+   "stop_distance_pct": 0.5487357643397326,
+   "r_gross": -1.0,
+   "r_net": -1.909,
+   "fee_drag_r": 0.909,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-03-26 04:00:00+00:00",
+   "stop_distance_pct": 1.0418359085686923,
+   "r_gross": -1.0,
+   "r_net": -1.477,
+   "fee_drag_r": 0.477,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-05-15 20:00:00+00:00",
+   "stop_distance_pct": 1.129536673161391,
+   "r_gross": -1.0,
+   "r_net": -1.44,
+   "fee_drag_r": 0.44,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-07-29 08:00:00+00:00",
+   "stop_distance_pct": 0.40975598747362313,
+   "r_gross": 0.75,
+   "r_net": -0.472,
+   "fee_drag_r": 1.222,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-12-04 20:00:00+00:00",
+   "stop_distance_pct": 2.1836368150936147,
+   "r_gross": -1.0,
+   "r_net": -1.226,
+   "fee_drag_r": 0.226,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2024-12-17 04:00:00+00:00",
+   "stop_distance_pct": 0.37772768929730266,
+   "r_gross": -1.0,
+   "r_net": -2.321,
+   "fee_drag_r": 1.321,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 0.5719517558088483,
+   "r_gross": 0.75,
+   "r_net": -0.126,
+   "fee_drag_r": 0.876,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-04 04:00:00+00:00",
+   "stop_distance_pct": 0.7093759322260919,
+   "r_gross": 0.75,
+   "r_net": 0.043,
+   "fee_drag_r": 0.707,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-24 12:00:00+00:00",
+   "stop_distance_pct": 0.9934306365476537,
+   "r_gross": -1.0,
+   "r_net": -1.501,
+   "fee_drag_r": 0.501,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-01-31 16:00:00+00:00",
+   "stop_distance_pct": 2.5996912277671407,
+   "r_gross": -1.0,
+   "r_net": -1.19,
+   "fee_drag_r": 0.19,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-07-27 16:00:00+00:00",
+   "stop_distance_pct": 0.20863707204264026,
+   "r_gross": 1.5,
+   "r_net": -0.9,
+   "fee_drag_r": 2.4,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-08-07 12:00:00+00:00",
+   "stop_distance_pct": 2.50573069382334,
+   "r_gross": 2.384,
+   "r_net": 2.179,
+   "fee_drag_r": 0.206,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-09-11 04:00:00+00:00",
+   "stop_distance_pct": 0.5515579519738344,
+   "r_gross": 0.75,
+   "r_net": -0.158,
+   "fee_drag_r": 0.908,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-09-29 20:00:00+00:00",
+   "stop_distance_pct": 1.0041224127565807,
+   "r_gross": -1.0,
+   "r_net": -1.495,
+   "fee_drag_r": 0.495,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-10-26 16:00:00+00:00",
+   "stop_distance_pct": 0.5921125541247669,
+   "r_gross": -1.0,
+   "r_net": -1.842,
+   "fee_drag_r": 0.842,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-10-26 20:00:00+00:00",
+   "stop_distance_pct": 0.3788171373590551,
+   "r_gross": 0.75,
+   "r_net": -0.572,
+   "fee_drag_r": 1.322,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "ETH/USD",
+   "signal_ts": "2025-11-10 00:00:00+00:00",
+   "stop_distance_pct": 0.040276402745040775,
+   "r_gross": 1.5,
+   "r_net": -10.918,
+   "fee_drag_r": 12.418,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2024-11-23 16:00:00+00:00",
+   "stop_distance_pct": 0.2284726888739665,
+   "r_gross": -1.0,
+   "r_net": -3.186,
+   "fee_drag_r": 2.186,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 0.9429966685858214,
+   "r_gross": -1.0,
+   "r_net": -1.528,
+   "fee_drag_r": 0.528,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-01-15 20:00:00+00:00",
+   "stop_distance_pct": 1.959765036128288,
+   "r_gross": 0.75,
+   "r_net": 0.493,
+   "fee_drag_r": 0.257,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-22 20:00:00+00:00",
+   "stop_distance_pct": 1.7800924994972775,
+   "r_gross": -1.0,
+   "r_net": -1.278,
+   "fee_drag_r": 0.278,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-23 16:00:00+00:00",
+   "stop_distance_pct": 0.123547319067621,
+   "r_gross": 1.5,
+   "r_net": -2.551,
+   "fee_drag_r": 4.051,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-08-23 20:00:00+00:00",
+   "stop_distance_pct": 0.9047572387438277,
+   "r_gross": 1.5,
+   "r_net": 0.944,
+   "fee_drag_r": 0.556,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-09-08 12:00:00+00:00",
+   "stop_distance_pct": 2.015600431747641,
+   "r_gross": 3.063,
+   "r_net": 2.807,
+   "fee_drag_r": 0.256,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SOL/USD",
+   "signal_ts": "2025-10-26 20:00:00+00:00",
+   "stop_distance_pct": 0.5506072901892206,
+   "r_gross": -1.0,
+   "r_net": -1.906,
+   "fee_drag_r": 0.906,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-01-02 04:00:00+00:00",
+   "stop_distance_pct": 0.3025386524145899,
+   "r_gross": 1.5,
+   "r_net": -0.156,
+   "fee_drag_r": 1.656,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-01-15 12:00:00+00:00",
+   "stop_distance_pct": 1.352267638968844,
+   "r_gross": 0.75,
+   "r_net": 0.378,
+   "fee_drag_r": 0.372,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-02-29 08:00:00+00:00",
+   "stop_distance_pct": 2.24704245088028,
+   "r_gross": -1.0,
+   "r_net": -1.22,
+   "fee_drag_r": 0.22,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-02-29 20:00:00+00:00",
+   "stop_distance_pct": 0.6337041817491459,
+   "r_gross": -1.0,
+   "r_net": -1.787,
+   "fee_drag_r": 0.787,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-03-25 16:00:00+00:00",
+   "stop_distance_pct": 1.4545230538302336,
+   "r_gross": 1.91,
+   "r_net": 1.562,
+   "fee_drag_r": 0.349,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-04 00:00:00+00:00",
+   "stop_distance_pct": 0.3173812931731879,
+   "r_gross": 1.5,
+   "r_net": -0.079,
+   "fee_drag_r": 1.579,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-04 04:00:00+00:00",
+   "stop_distance_pct": 0.0332847930101898,
+   "r_gross": 1.5,
+   "r_net": -13.526,
+   "fee_drag_r": 15.026,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-12 16:00:00+00:00",
+   "stop_distance_pct": 3.0722891566264967,
+   "r_gross": -1.0,
+   "r_net": -1.16,
+   "fee_drag_r": 0.16,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2024-12-13 00:00:00+00:00",
+   "stop_distance_pct": 6.111198830208627,
+   "r_gross": -1.0,
+   "r_net": -1.079,
+   "fee_drag_r": 0.079,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-01-20 08:00:00+00:00",
+   "stop_distance_pct": 1.4247959817059344,
+   "r_gross": 0.75,
+   "r_net": 0.397,
+   "fee_drag_r": 0.353,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-02-11 08:00:00+00:00",
+   "stop_distance_pct": 1.3002433338004686,
+   "r_gross": -1.0,
+   "r_net": -1.382,
+   "fee_drag_r": 0.382,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-02-11 12:00:00+00:00",
+   "stop_distance_pct": 0.9175109796930188,
+   "r_gross": -1.0,
+   "r_net": -1.542,
+   "fee_drag_r": 0.542,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-08-17 12:00:00+00:00",
+   "stop_distance_pct": 0.5747126436781588,
+   "r_gross": 0.75,
+   "r_net": -0.122,
+   "fee_drag_r": 0.872,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-09-09 08:00:00+00:00",
+   "stop_distance_pct": 1.6469376979936692,
+   "r_gross": -1.0,
+   "r_net": -1.301,
+   "fee_drag_r": 0.301,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "LINK/USD",
+   "signal_ts": "2025-10-27 04:00:00+00:00",
+   "stop_distance_pct": 1.4440833210222974,
+   "r_gross": -1.0,
+   "r_net": -1.344,
+   "fee_drag_r": 0.344,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-01-09 08:00:00+00:00",
+   "stop_distance_pct": 1.208069086493059,
+   "r_gross": -1.0,
+   "r_net": -1.411,
+   "fee_drag_r": 0.411,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-01-11 08:00:00+00:00",
+   "stop_distance_pct": 2.035868136444685,
+   "r_gross": 1.5,
+   "r_net": 1.251,
+   "fee_drag_r": 0.249,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-03-11 12:00:00+00:00",
+   "stop_distance_pct": 4.683914267157392,
+   "r_gross": 2.268,
+   "r_net": 2.156,
+   "fee_drag_r": 0.112,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2024-04-08 20:00:00+00:00",
+   "stop_distance_pct": 0.6198444237507286,
+   "r_gross": -1.0,
+   "r_net": -1.804,
+   "fee_drag_r": 0.804,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AVAX/USD",
+   "signal_ts": "2025-01-02 08:00:00+00:00",
+   "stop_distance_pct": 0.5071904585841638,
+   "r_gross": 0.75,
+   "r_net": -0.238,
+   "fee_drag_r": 0.988,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  }
+ ],
+ "regimes": {
+  "BTC/USD": {
+   "days": 925,
+   "counts": {
+    "BULLISH": 596,
+    "UNCLASSIFIED": 49,
+    "BEARISH": 250,
+    "IMPROVING_NEUTRAL": 30
+   },
+   "setup_a_eligible_pct": 67.67567567567568,
+   "setup_b_eligible_pct": 64.43243243243244
+  },
+  "ETH/USD": {
+   "days": 925,
+   "counts": {
+    "BULLISH": 391,
+    "UNCLASSIFIED": 68,
+    "BEARISH": 408,
+    "IMPROVING_NEUTRAL": 58
+   },
+   "setup_a_eligible_pct": 48.54054054054054,
+   "setup_b_eligible_pct": 42.270270270270274
+  },
+  "SOL/USD": {
+   "days": 925,
+   "counts": {
+    "INSUFFICIENT": 239,
+    "BULLISH": 265,
+    "UNCLASSIFIED": 48,
+    "BEARISH": 337,
+    "IMPROVING_NEUTRAL": 36
+   },
+   "setup_a_eligible_pct": 32.54054054054054,
+   "setup_b_eligible_pct": 28.64864864864865
+  },
+  "LINK/USD": {
+   "days": 925,
+   "counts": {
+    "BULLISH": 294,
+    "UNCLASSIFIED": 105,
+    "BEARISH": 477,
+    "IMPROVING_NEUTRAL": 49
+   },
+   "setup_a_eligible_pct": 37.08108108108108,
+   "setup_b_eligible_pct": 31.783783783783782
+  },
+  "AVAX/USD": {
+   "days": 925,
+   "counts": {
+    "BULLISH": 253,
+    "UNCLASSIFIED": 65,
+    "BEARISH": 575,
+    "IMPROVING_NEUTRAL": 32
+   },
+   "setup_a_eligible_pct": 30.81081081081081,
+   "setup_b_eligible_pct": 27.35135135135135
+  }
+ }
+}
