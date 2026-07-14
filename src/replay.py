@@ -49,10 +49,12 @@ for both variants so comparison bias mostly cancels):
     tranche. R is reported gross and net of fees.
 
 Known fidelity gaps (documented, accepted for Phase 6):
-  * _drop_in_progress_candle drops the last RAW bar; if a thin symbol
-    had zero trades so far in the current hour Alpaca returns no
-    partial bar and production silently evaluates one completed bar
-    behind. The replay assumes the partial bar always existed.
+  * (fixed 2026-07-14) _drop_in_progress_candle used to drop the last
+    RAW bar blindly; a thin symbol with zero trades so far in the
+    current window has no partial bar and production silently
+    evaluated one completed bar behind. The replay always assumed the
+    partial existed; production now cuts by timestamp, matching the
+    replay's frames.
   * Production's 1-entry/day, 2-position, and BTC/ETH correlation caps
     span symbols; the replay books are per-symbol sequential (flat ->
     enter -> manage to close -> resume scanning). Cross-symbol slot

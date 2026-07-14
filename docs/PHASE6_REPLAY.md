@@ -189,7 +189,8 @@ improving the mean. **Recommendation: keep 0.005; no code change.**
   blindly. If a thin symbol has zero trades so far in the current
   hour, Alpaca returns no partial bar and the watcher silently
   evaluates one completed bar behind. Worth a guard in a future
-  hygiene pass.
+  hygiene pass. *(Fixed 2026-07-14 — the cut is now by timestamp,
+  mirroring the day strand's `_drop_in_progress_bars`.)*
 
 ## Proposed Phase 7 agenda
 

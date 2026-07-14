@@ -79,19 +79,26 @@ def _has_open_position(symbol: str, positions) -> bool:
     return any(getattr(p, "symbol", None) == target for p in positions)
 
 
-def _drop_in_progress_candle(df):
-    """Drop the most recent bar — at scan time it's still forming.
+def _drop_in_progress_candle(df, period: timedelta,
+                             now_utc: datetime | None = None):
+    """Keep only CLOSED bars — a bar is closed once start + period <= now.
 
     The strategy doc is explicit: evaluate on closed candles. The cron
-    fires at :17 of 00/04/08/12/16/20 UTC; at every scan time the most
-    recent 1H bar is ~17 minutes old, the most recent 4H bar is between
-    17 minutes and 4 hours into its window (the :17 minute is always
-    inside the current 4H bar, never on its boundary), and the daily
-    bar is some hours into its 24-hour window. None are closed.
+    fires at :17 of 00/04/08/12/16/20 UTC, so the most recent bar of
+    each timeframe is normally mid-window and gets cut. But the cut is
+    by timestamp, not blindly `iloc[:-1]` (the pre-hygiene behavior):
+    on a thin symbol with zero trades so far in the current window
+    Alpaca returns no partial bar at all, and dropping the last bar
+    then silently evaluated one completed bar behind (Phase 6 finding).
+    Crypto bars are stamped with their bucket START on clean UTC
+    boundaries (daily at 00:00 UTC), same convention as the day-trade
+    strand's _drop_in_progress_bars.
     """
-    if len(df) > 0:
-        return df.iloc[:-1].copy()
-    return df
+    if len(df) == 0:
+        return df
+    now_utc = now_utc or datetime.now(timezone.utc)
+    cutoff = now_utc - period
+    return df[df.index <= cutoff].copy()
 
 
 def _scan_symbol(symbol: str, positions) -> dict:
@@ -104,9 +111,9 @@ def _scan_symbol(symbol: str, positions) -> dict:
     h4_raw = get_bars(symbol, "4Hour", limit=250)
     h1_raw = get_bars(symbol, "1Hour", limit=250)
 
-    daily = _drop_in_progress_candle(daily_raw)
-    h4 = add_indicators(_drop_in_progress_candle(h4_raw))
-    h1 = add_indicators(_drop_in_progress_candle(h1_raw))
+    daily = _drop_in_progress_candle(daily_raw, timedelta(days=1))
+    h4 = add_indicators(_drop_in_progress_candle(h4_raw, timedelta(hours=4)))
+    h1 = add_indicators(_drop_in_progress_candle(h1_raw, timedelta(hours=1)))
 
     regime = classify_regime(daily)
     has_position = _has_open_position(symbol, positions)
