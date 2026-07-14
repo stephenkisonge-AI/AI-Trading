@@ -22,7 +22,7 @@ back to me before we trade. If anything is ambiguous, ask.
   showing me the full proposal and getting an explicit 'go' from me.
   Every single time. In PAPER mode, the gate can be bypassed by setting
   `WATCHER_AUTO_EXECUTE=true` so the GitHub-Actions watcher executes
-  qualifying setups on its own — the mechanical 8-condition checklist
+  qualifying setups on its own — the mechanical 9-condition checklist
   IS the gate. The flag is honored only when `ALPACA_PAPER_TRADE=True`;
   live mode auto-execute is hard-refused in code. See §"Paper auto-execution
   mode" below for what runs automatically and what is still deferred.
@@ -126,7 +126,12 @@ Long entry triggers only when ALL of these are true:
    (filter out dead-zone moves).
 7. A logical stop placement exists: below the most recent 4H swing low,
    AND that stop distance is no more than 1.5× the 4H ATR(14).
-8. No existing position in this asset.
+8. **Fee floor:** that stop distance is at least **2% of entry**. Any
+   tighter and round-trip fees dominate R — the Phase 6/7 replays put
+   the median structural stop at 0.6–0.9% of entry, where fee drag is
+   0.55R+ and the worst replayed trade lost 67.5R net on a −1R
+   stop-out.
+9. No existing position in this asset.
 
 ### Entry Setup B — Breakout retest
 
@@ -144,7 +149,12 @@ Long entry triggers only when ALL of these are true:
    and the next 1H candle closed green above it.
 7. A logical stop placement exists: just below the retested level,
    AND that stop distance is no more than 1.5× the 4H ATR(14).
-8. No existing position in this asset.
+8. **Fee floor:** that stop distance is at least **2% of entry** (same
+   rationale as Setup A.8 — and for Setup B the replay showed the
+   deep-retest trades this selects were the only ones with edge:
+   +0.28R net vs −3.88R for the ungated book; skip-don't-widen, see
+   docs/PHASE7_SETUP_B_REPLAY.md Addendum A).
+9. No existing position in this asset.
 
 **No chasing rule:** If the breakout has already moved more than
 2× ATR above the breakout level without a retest, we missed it.
@@ -170,7 +180,11 @@ calculation. Round notional down to a quantity Alpaca will accept.
 notional. On a 3% stop that's about 0.17R of friction. TP1 at +1.5R
 nominal is really ~+1.3R net. Set the orders at nominal levels (the
 orders use prices, not R), but evaluate strategy expectancy on NET R
-after fees — not the headline number.
+after fees — not the headline number. The entry checklists enforce
+this with the 2% stop-distance floor (A.8/B.8), which caps friction
+at ~0.25R; note it combines with the 1.5×ATR stop cap to also reject
+entries when 4H ATR is below ~1.33% of price — volatility that low
+cannot pay the fees.
 
 ### Stops, targets, and trade management
 
@@ -502,8 +516,8 @@ Please:
 1. Confirm you've read this whole document.
 2. State the 3 pairs in the universe (and which are active vs gated).
 3. State the 4 regime labels and the trading rule for each.
-4. State the 8 conditions for Setup A.
-5. State the 8 conditions for Setup B.
+4. State the 9 conditions for Setup A.
+5. State the 9 conditions for Setup B.
 6. State the 5 risk caps.
 7. Call `get_account_info` and confirm we're in paper mode with current
    equity.

@@ -42,10 +42,12 @@ def _h4_for_setup_a(
     ema50: float = 195.0,
     ema200: float = 180.0,
     rsi14: float = 42.0,
-    atr14: float = 2.0,
+    # ATR and swing low sized so the stop clears BOTH the 1.5xATR cap
+    # (dist 5.0 <= 6.0) and the 2% fee floor (5.0/200 = 2.5%).
+    atr14: float = 4.0,
     volume: float = 1000.0,
     vol_sma20: float = 900.0,
-    swing_low: float = 197.0,
+    swing_low: float = 195.0,
     prior_swing_low: float = 190.0,
 ) -> pd.DataFrame:
     """Build a 4H DataFrame whose last bar satisfies Setup A geometry by
@@ -335,8 +337,8 @@ def test_setup_a_qualifies_on_happy_path():
     assert not failed, f"unexpected failing conditions: {failed}"
     assert result["qualified"] is True
     assert result["entry"] == pytest.approx(200.0)
-    assert result["stop"] == pytest.approx(197.0)
-    assert result["atr"] == pytest.approx(2.0)
+    assert result["stop"] == pytest.approx(195.0)
+    assert result["atr"] == pytest.approx(4.0)
 
 
 def test_setup_a_improving_neutral_regime_also_qualifies():
@@ -346,6 +348,22 @@ def test_setup_a_improving_neutral_regime_also_qualifies():
     result = evaluate_setup_a(_daily_improving(), h4, h1, "BTC/USD", has_position=False)
     cond1 = next(c for c in result["conditions"] if c["name"] == "daily_regime_bullish_or_improving")
     assert cond1["passed"] is True
+
+
+def test_setup_a_rejects_stop_inside_fee_floor():
+    # Swing low 1.5% below entry: passes the 1.5xATR cap (3.0 <= 6.0)
+    # but sits inside the 2% fee floor -> only the floor condition fails.
+    h4 = _h4_for_setup_a(swing_low=197.0)
+    h1 = _h1_for_setup_a()
+    result = evaluate_setup_a(_daily_bullish(), h4, h1, "BTC/USD", has_position=False)
+    assert result["qualified"] is False
+    failed = [c["name"] for c in result["conditions"] if not c["passed"]]
+    assert failed == ["stop_distance_above_fee_floor"]
+    floor = next(c for c in result["conditions"]
+                 if c["name"] == "stop_distance_above_fee_floor")
+    assert floor["observed"] == pytest.approx(0.015)
+    assert floor["threshold"] == pytest.approx(0.02)
+    assert floor["margin"] < 0
 
 
 def test_setup_a_rejects_when_h1_prior_close_above_ema20():
@@ -369,7 +387,9 @@ def _h4_for_setup_b(
     breakout_level: float = 100.0,
     breakout_close: float = 105.0,
     breakout_volume: float = 2000.0,
-    final_close: float = 102.0,
+    # 102.5 puts the stop (the level, 100.0) 2.44% below entry — above
+    # the 2% fee floor and inside the 1.5xATR cap (2.5 <= 4.5).
+    final_close: float = 102.5,
     rsi14: float = 60.0,
     atr14: float = 3.0,
     vol_sma20: float = 1000.0,
@@ -492,8 +512,22 @@ def test_setup_b_qualifies_on_happy_path():
     failed = [c for c in result["conditions"] if not c["passed"]]
     assert not failed, f"unexpected failing conditions: {failed}"
     assert result["qualified"] is True
-    assert result["entry"] == pytest.approx(102.0)
+    assert result["entry"] == pytest.approx(102.5)
     assert result["stop"] == pytest.approx(100.0)
+
+
+def test_setup_b_rejects_stop_inside_fee_floor():
+    # Entry 101.5 -> stop distance 1.5/101.5 = 1.48% of entry: inside
+    # the 2% floor while still passing the 1.5xATR cap (1.5 <= 4.5).
+    h4 = _h4_for_setup_b(final_close=101.5)
+    h1 = _h1_for_setup_b_retest(after_ts=h4.index[-5])
+    result = evaluate_setup_b(_daily_bullish(), h4, h1, "BTC/USD", has_position=False)
+    assert result["qualified"] is False
+    failed = [c["name"] for c in result["conditions"] if not c["passed"]]
+    assert failed == ["stop_distance_above_fee_floor"]
+    floor = next(c for c in result["conditions"]
+                 if c["name"] == "stop_distance_above_fee_floor")
+    assert floor["margin"] < 0
 
 
 def test_setup_b_no_chasing_rule_rejects_runaway_breakout():

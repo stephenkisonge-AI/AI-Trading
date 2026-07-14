@@ -115,7 +115,7 @@ def classify_regime(daily_df: pd.DataFrame) -> str:
 # ---------------------------------------------------------------------------
 # Setup evaluators
 #
-# Mechanical translations of the 8-condition checklists in Crypto Strategy.md.
+# Mechanical translations of the 9-condition checklists in Crypto Strategy.md.
 # Decisions baked in (call them out here so future-me sees the contract):
 #   - Pullback proximity:  |close - EMA| / EMA <= 0.01   (1%)
 #   - Swing low detection: bar whose low is the min of itself ±3 bars
@@ -154,6 +154,15 @@ _RETEST_BAND_PCT = 0.005
 # Setup A.7 / Setup B.7 stop cap: stop distance must be ≤ this × 4H ATR(14).
 # 1.5 matches "no more than 1.5× the 4H ATR(14)" in both setups.
 _STOP_ATR_CAP = 1.5
+
+# Setup A.8 / Setup B.8 fee-aware stop-distance floor: stop distance must
+# be ≥ this fraction of entry. At 0.25%/side fees a 2% stop keeps
+# round-trip friction ≤ ~0.25R; tighter structural stops let fees dominate
+# R (Phase 6/7 replays: median stop 0.6–0.9% of entry, worst trade −67.5R
+# net on a ~1bp stop). Interaction with _STOP_ATR_CAP: both are
+# satisfiable only when 1.5×ATR ≥ 2% of price — the gate deliberately
+# also rejects volatility too low to pay fees.
+_MIN_STOP_DIST_PCT = 0.02
 
 # Setup B no-chasing rule: if breakout occurred but no qualifying retest
 # happened AND current price > breakout_level + _NO_CHASE_ATR_MULT × ATR,
@@ -302,7 +311,7 @@ def evaluate_setup_a(
     symbol: str,
     has_position: bool,
 ) -> dict:
-    """Evaluate the 8-condition pullback-continuation setup for `symbol`.
+    """Evaluate the 9-condition pullback-continuation setup for `symbol`.
     Returns a dict with `qualified`, `conditions` (list of per-check dicts),
     and `entry`/`stop`/`atr` if qualified.
     """
@@ -504,6 +513,24 @@ def evaluate_setup_a(
         )
     )
 
+    stop_dist_pct = (stop_dist / h4_close
+                     if stop_dist is not None and stop_dist > 0 else None)
+    fee_floor_ok = (stop_dist_pct is not None
+                    and stop_dist_pct >= _MIN_STOP_DIST_PCT)
+    conditions.append(
+        _check(
+            "stop_distance_above_fee_floor",
+            fee_floor_ok,
+            f"stop_dist_pct={'NaN' if stop_dist_pct is None else f'{stop_dist_pct * 100:.3f}%'} "
+            f"floor={_MIN_STOP_DIST_PCT * 100:.1f}%",
+            observed=stop_dist_pct, threshold=_MIN_STOP_DIST_PCT,
+            margin=(None if stop_dist_pct is None
+                    else (stop_dist_pct - _MIN_STOP_DIST_PCT)
+                    / _MIN_STOP_DIST_PCT),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts,
+        )
+    )
+
     cond8 = not has_position
     conditions.append(_check("no_existing_position", cond8,
                              f"has_position={has_position}", kind="state"))
@@ -547,7 +574,7 @@ def evaluate_setup_b(
     symbol: str,
     has_position: bool,
 ) -> dict:
-    """Evaluate the 8-condition breakout-retest setup for `symbol`. Same
+    """Evaluate the 9-condition breakout-retest setup for `symbol`. Same
     return shape as evaluate_setup_a.
     """
     conditions: list[dict] = []
@@ -677,6 +704,24 @@ def evaluate_setup_b(
             observed=stop_dist, threshold=stop_cap_b,
             margin=(None if (stop_dist is None or not stop_cap_b)
                     else (stop_cap_b - stop_dist) / stop_cap_b),
+            kind="state", timeframe="4Hour", candle_ts=h4_ts_b,
+        )
+    )
+
+    stop_dist_pct = (stop_dist / h4_close
+                     if stop_dist is not None and stop_dist > 0 else None)
+    fee_floor_ok = (stop_dist_pct is not None
+                    and stop_dist_pct >= _MIN_STOP_DIST_PCT)
+    conditions.append(
+        _check(
+            "stop_distance_above_fee_floor",
+            fee_floor_ok,
+            f"stop_dist_pct={'NaN' if stop_dist_pct is None else f'{stop_dist_pct * 100:.3f}%'} "
+            f"floor={_MIN_STOP_DIST_PCT * 100:.1f}%",
+            observed=stop_dist_pct, threshold=_MIN_STOP_DIST_PCT,
+            margin=(None if stop_dist_pct is None
+                    else (stop_dist_pct - _MIN_STOP_DIST_PCT)
+                    / _MIN_STOP_DIST_PCT),
             kind="state", timeframe="4Hour", candle_ts=h4_ts_b,
         )
     )

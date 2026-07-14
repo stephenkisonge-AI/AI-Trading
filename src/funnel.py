@@ -32,6 +32,7 @@ CONDITION_ORDER = {
         "h1_green_close_reclaims_ema20",
         "h1_volume_above_threshold",
         "stop_below_swing_low_within_atr_cap",
+        "stop_distance_above_fee_floor",
         "no_existing_position",
     ],
     "B": [
@@ -42,6 +43,7 @@ CONDITION_ORDER = {
         "h4_rsi_in_momentum_zone",
         "h1_retest_of_level_held",
         "stop_below_retested_level_within_atr_cap",
+        "stop_distance_above_fee_floor",
         "no_existing_position",
     ],
 }
