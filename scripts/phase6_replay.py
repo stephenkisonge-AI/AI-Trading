@@ -104,6 +104,9 @@ def main(argv=None) -> int:
     parser.add_argument("--symbols", default=",".join(CRYPTO_SYMBOLS))
     parser.add_argument("--cache-dir", default=".replay_cache")
     parser.add_argument("--setup", choices=("A", "B"), default="A")
+    parser.add_argument("--stop-atr-floor", type=float, default=None,
+                        help="Setup B only: widen the stop to at least "
+                             "this many ATRs below entry")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
     if args.out is None:
@@ -119,7 +122,8 @@ def main(argv=None) -> int:
     cache_dir = Path(args.cache_dir)
 
     results = {"start": str(start), "end": str(end), "symbols": symbols,
-               "setup": args.setup, "per_symbol": {}, "combined": {}}
+               "setup": args.setup, "stop_atr_floor": args.stop_atr_floor,
+               "per_symbol": {}, "combined": {}}
     all_trades: dict[str, list[SimTrade]] = {v: [] for v in variants}
     all_stop_hits: list[dict] = []
     signal_counts = {"exact": 0, "window": 0, "window_only": 0, "scans": 0}
@@ -139,7 +143,7 @@ def main(argv=None) -> int:
             symbol, daily, h4, h1, start, end,
             progress=lambda sym, ts: print(f"[replay]   {sym} @ {ts:%Y-%m-%d}",
                                            flush=True),
-            setup=args.setup)
+            setup=args.setup, stop_atr_floor=args.stop_atr_floor)
         sigs = out["signals"]
         signal_counts["scans"] += len(sigs)
         signal_counts["exact"] += sum(s.exact for s in sigs)

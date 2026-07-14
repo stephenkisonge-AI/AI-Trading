@@ -170,11 +170,18 @@ def evaluate_scan(daily: pd.DataFrame, h4: pd.DataFrame,
 
 def evaluate_scan_b(daily: pd.DataFrame, h4: pd.DataFrame,
                     h1: pd.DataFrame, symbol: str,
-                    scan_ts: datetime) -> Signal:
+                    scan_ts: datetime,
+                    stop_atr_floor: float | None = None) -> Signal:
     """Run the production Setup B evaluator once (has_position=False —
     the per-symbol book applies position state afterwards). Setup B has
     no reclaim-window variant; `window` is always False. Entry, stop
     (the breakout level) and ATR come straight off the evaluator.
+
+    stop_atr_floor (Phase 7 stop-widening experiment): when set, the
+    stop is widened to at least that many ATRs below entry —
+    min(level, entry - floor*ATR) — so tight breakout levels get
+    tradeable R geometry instead of being fee bait. Qualification is
+    untouched; only the stop (and thus R, TPs, fee drag) changes.
     """
     result = evaluate_setup_b(daily, h4, h1, symbol, has_position=False)
     sig = Signal(
@@ -188,6 +195,8 @@ def evaluate_scan_b(daily: pd.DataFrame, h4: pd.DataFrame,
         sig.entry = float(result["entry"])
         sig.stop = float(result["stop"])
         sig.atr = float(result["atr"])
+        if stop_atr_floor is not None:
+            sig.stop = min(sig.stop, sig.entry - stop_atr_floor * sig.atr)
     return sig
 
 
@@ -376,15 +385,22 @@ def simulate_trade(sig: Signal, variant: str, daily: pd.DataFrame,
 
 def replay_symbol(symbol: str, daily: pd.DataFrame, h4: pd.DataFrame,
                   h1: pd.DataFrame, start: datetime, end: datetime,
-                  progress=None, setup: str = "A") -> dict:
+                  progress=None, setup: str = "A",
+                  stop_atr_floor: float | None = None) -> dict:
     """Evaluate every scan in [start, end] once, then run the two
     variants' books over the shared signal list. Returns
     {"signals": [Signal...], "trades": {"exact": [...], "window": [...]}}.
     setup="A" replays evaluate_setup_a with both entry variants;
     setup="B" replays evaluate_setup_b (single variant under "exact",
-    the "window" book stays empty).
+    the "window" book stays empty). stop_atr_floor applies the Setup B
+    stop-widening experiment (ignored for setup="A").
     """
-    evaluate = evaluate_scan if setup == "A" else evaluate_scan_b
+    if setup == "A":
+        evaluate = evaluate_scan
+    else:
+        def evaluate(d, h4_s, h1_s, sym, ts):
+            return evaluate_scan_b(d, h4_s, h1_s, sym, ts,
+                                   stop_atr_floor=stop_atr_floor)
     signals: list[Signal] = []
     for i, ts in enumerate(scan_times(start, end)):
         sliced = frames_at(daily, h4, h1, ts)

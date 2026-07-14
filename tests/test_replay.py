@@ -210,6 +210,26 @@ class TestSetupBScan:
         assert not sig.exact and not sig.window
         assert sig.entry is None and sig.stop is None
 
+    def test_stop_atr_floor_widens_tight_stops_only(self, frames,
+                                                    monkeypatch):
+        daily, h4, h1, t = frames
+        # Tight level: 0.5 below entry, ATR 2.0 -> widened to entry - 2.0.
+        monkeypatch.setattr(
+            replay, "evaluate_setup_b",
+            lambda *a, **k: _canned_b_result(True, entry=100.0, stop=99.5,
+                                             atr=2.0))
+        sig = evaluate_scan_b(daily, h4, h1, "BTC/USD", t,
+                              stop_atr_floor=1.0)
+        assert sig.stop == 98.0
+        # Level already deeper than 1 ATR below entry -> kept as-is.
+        monkeypatch.setattr(
+            replay, "evaluate_setup_b",
+            lambda *a, **k: _canned_b_result(True, entry=100.0, stop=97.0,
+                                             atr=2.0))
+        sig = evaluate_scan_b(daily, h4, h1, "BTC/USD", t,
+                              stop_atr_floor=1.0)
+        assert sig.stop == 97.0
+
     def test_replay_symbol_setup_b_routes_to_b_evaluator(self, monkeypatch):
         t0 = _utc(2024, 9, 1, 0)
         daily = _bars(t0 - timedelta(days=260), timedelta(days=1),
