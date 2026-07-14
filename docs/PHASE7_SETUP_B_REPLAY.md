@@ -145,7 +145,57 @@ data — but n=9 is n=9: treat the sign as the finding, not the +0.28.
    itself would convert tight-stop signals into tradeable geometry
    rather than skipping them (more samples, smaller R per unit
    notional). That is a one-experiment rerun through this harness.
+   *(Done same day — see Addendum A below: widening does not clear
+   the gate; the skip-gate stands.)*
 4. **Keep `WATCHER_AUTO_EXECUTE=false`.** Nothing here clears the
    +0.2R gate at a usable sample size. The path to more samples is
    signal-only alerting of floor-gated Setup B plus continued Phase 5
    telemetry, not live execution.
+
+---
+
+## Addendum A — stop-widening experiment (skip vs widen)
+
+Date: 2026-07-14. Rerun of the same window with
+`--stop-atr-floor 1.0`: stop = min(breakout level, entry − 1×ATR).
+Qualification untouched; only R geometry changes. Raw results:
+`docs/phase6/setup_b_atr_results.json`, sensitivity in
+`docs/phase6/setup_b_atr_supplement.json`.
+
+| Configuration | n | Win | Mean R gross | Mean R net | Worst R |
+|---|---|---|---|---|---|
+| Baseline (stop = level) | 85 | 20.0% | −0.19 | −3.88 | −67.5 |
+| Widened (≥1×ATR) | 66 | 39.4% | −0.00 | **−0.28** | −1.59 |
+| Skip-gate (level ≥ 2%) | 9 | 44.4% | +0.47 | **+0.28** | −1.23 |
+
+Conservative model; optimistic agrees within ±0.01R on the widened
+book and exactly on the skip-gate book.
+
+**Widening fixes the catastrophes but not the expectancy.** The
+widened book's worst trade is −1.59R and gross expectancy is exactly
+breakeven — fees (median widened stop distance 1.9%, ≈0.26R
+round-trip) turn it into a steady −0.28R bleed. Distance floors
+stacked on the widened book make it *worse* (≥3%: −0.46R net), and
+the effect is monotone: the further the stop sits from real
+structure, the worse the trades do.
+
+**Reading: the baseline skip-gate's positive subset is a selection
+effect, not a geometry effect.** Requiring the *structural level
+itself* to sit ≥2% below entry selects breakouts with deep, held
+retests — those trades won at both bounds. Manufacturing the same
+stop distance with an ATR offset keeps the tight-retest trades in the
+book and their ~zero gross edge cannot pay the fees. Skip, don't
+widen.
+
+Per-symbol footnote (widened book): SOL +1.11R net (n=6, 83% win) and
+AVAX +0.20R stay positive under every configuration tested; BTC/ETH/
+LINK are negative under all of them. Whatever edge Setup B has lives
+in the thinner alts, consistent with the baseline replay.
+
+**Recommendation to close Phase 7's experiment phase:** adopt the
+fee-aware skip-gate — reject entries whose structural stop is closer
+than 2% of entry — for both setups, in signal-only mode. Expected
+signal rate ≈3.5/year on this universe; the 30-trade checkpoint
+therefore needs live accumulation plus, realistically, a wider
+universe or a second qualifying pattern before expectancy can be
+judged. Auto-execution stays off.
