@@ -259,6 +259,15 @@ def check_failed_runs(token: str, repo: str,
 
 # --- report ---------------------------------------------------------------
 
+def healthy_message(n_runs: int, lookback_minutes: int) -> str:
+    """Short all-clear note — sent on every healthy pass so the doctor's
+    own liveness is visible (a silent doctor is indistinguishable from a
+    dead one)."""
+    return (f"🩺 doctor ✓ all healthy — {n_runs} runs checked in the last "
+            f"{lookback_minutes // 60}h{lookback_minutes % 60:02d}m: "
+            f"dispatch ticks on schedule, no failed runs.")
+
+
 def build_report(findings: list[Finding]) -> str | None:
     """One Telegram-ready message, CRITICALs first; None when healthy."""
     if not findings:
@@ -302,10 +311,9 @@ def main(argv=None) -> int:
     findings = check_dispatch_cadence(runs, now)
     findings += check_failed_runs(token, repo, runs)
     report = build_report(findings)
-
     if report is None:
-        print("[doctor] healthy — no findings, no alert sent")
-        return 0
+        report = healthy_message(len(runs), args.lookback_minutes)
+
     print(report)
     if args.dry_run:
         print("[doctor] dry-run — not sent")

@@ -4,8 +4,10 @@ name: Doctor
 # in-code alerts can't: a dead external-cron primary trigger hidden by
 # green backup-schedule runs, and failures that happen before our code
 # starts (GitHub platform outages, billing blocks). Sends the exact
-# problem + fix to Telegram. Read-only — no trading state, no Alpaca
-# calls, so it does NOT join the alpaca-paper-trading-state group.
+# problem + fix to Telegram, or a short "all healthy" note when clean
+# (so the doctor's own liveness is visible). Read-only — no trading
+# state, no Alpaca calls, so it does NOT join the
+# alpaca-paper-trading-state group.
 
 on:
   schedule:

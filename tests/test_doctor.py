@@ -6,6 +6,7 @@ from src.doctor import (
     build_report,
     check_dispatch_cadence,
     classify_failure,
+    healthy_message,
 )
 
 UTC = timezone.utc
@@ -133,6 +134,12 @@ class TestCadence:
 class TestReport:
     def test_healthy_returns_none(self):
         assert build_report([]) is None
+
+    def test_healthy_message_content(self):
+        msg = healthy_message(14, 400)
+        assert "all healthy" in msg
+        assert "14 runs" in msg
+        assert "6h40m" in msg
 
     def test_criticals_sort_first_and_fix_included(self):
         report = build_report([
