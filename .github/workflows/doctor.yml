@@ -1,0 +1,61 @@
+name: Doctor
+
+# Self-diagnosing health monitor (src/doctor.py). Detects what the
+# in-code alerts can't: a dead external-cron primary trigger hidden by
+# green backup-schedule runs, and failures that happen before our code
+# starts (GitHub platform outages, billing blocks). Sends the exact
+# problem + fix to Telegram. Read-only — no trading state, no Alpaca
+# calls, so it does NOT join the alpaca-paper-trading-state group.
+
+on:
+  schedule:
+    # Every 6 hours, offset from the other workflows' minutes. The
+    # free-tier scheduler is best-effort; occasional dropped ticks are
+    # fine for a 6-hourly health check.
+    - cron: '37 2,8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      test_ping:
+        description: 'Send a Telegram test ping instead of diagnosing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read     # list workflow runs
+  checks: read      # read failed jobs' annotations
+
+concurrency:
+  group: doctor
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send test ping (Telegram pipeline check)
+        if: github.event.inputs.test_ping == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "import sys; from src.notifier import send_alert; ok = send_alert('🩺 doctor → Telegram pipeline test (workflow_dispatch test_ping=true).'); print(f'telegram_ok={ok}'); sys.exit(0 if ok else 1)"
+
+      - name: Run doctor
+        if: github.event.inputs.test_ping != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.doctor
