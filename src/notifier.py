@@ -285,8 +285,10 @@ def format_scan_summary(
     appended when `run_kind == "fallback"` — i.e. the primary cron missed
     and the safety-net cron picked it up later.
     """
+    # A setup slot may be None (Setup A retired from live scanning).
     any_qualified = any(
-        r["setup_a"]["qualified"] or r["setup_b"]["qualified"]
+        (r["setup_a"] or {}).get("qualified")
+        or (r["setup_b"] or {}).get("qualified")
         for r in scan_results
     )
     if errors:
@@ -304,7 +306,8 @@ def format_scan_summary(
     for r in scan_results:
         sym = r["symbol"]
         regime = r["regime"]
-        qualifying = [s for s in (r["setup_a"], r["setup_b"]) if s["qualified"]]
+        qualifying = [s for s in (r["setup_a"], r["setup_b"])
+                      if s and s["qualified"]]
         if qualifying:
             tags = ", ".join(f"Setup {q['setup']} qualified" for q in qualifying)
             lines.append(f"• {sym} — {regime} · {tags}")

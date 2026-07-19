@@ -1,8 +1,10 @@
-"""Tests for src/watcher.py helpers — closed-bar slicing."""
+"""Tests for src/watcher.py helpers — closed-bar slicing, Setup A
+retirement."""
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+import src.watcher as watcher
 from src.watcher import _drop_in_progress_candle
 
 # Cron fires at :17 of every 4th hour — a mid-window scan time.
@@ -61,3 +63,31 @@ def test_empty_df_passthrough():
     empty = pd.DataFrame({"close": []}, index=pd.DatetimeIndex([], tz="UTC"))
     out = _drop_in_progress_candle(empty, timedelta(hours=1), now_utc=NOW)
     assert len(out) == 0
+
+
+# ---------------------------------------------------------------------------
+# Setup A retirement — the scan must not evaluate or emit Setup A while
+# SCAN_SETUP_A is False (Phase 7 evidence: docs/PHASE7_SETUP_B_REPLAY.md)
+# ---------------------------------------------------------------------------
+
+def test_scan_symbol_skips_retired_setup_a(monkeypatch):
+    assert watcher.SCAN_SETUP_A is False   # current production posture
+    bars = pd.DataFrame(
+        {"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0],
+         "volume": [1.0]},
+        index=pd.DatetimeIndex([datetime(2026, 7, 18, tzinfo=timezone.utc)],
+                               tz="UTC"))
+    monkeypatch.setattr(watcher, "get_bars", lambda *a, **k: bars)
+    monkeypatch.setattr(watcher, "add_indicators", lambda df: df)
+    monkeypatch.setattr(watcher, "classify_regime", lambda df: "BULLISH")
+    a_calls: list[str] = []
+    monkeypatch.setattr(watcher, "evaluate_setup_a",
+                        lambda *a, **k: a_calls.append("called"))
+    monkeypatch.setattr(
+        watcher, "evaluate_setup_b",
+        lambda *a, **k: {"setup": "B", "symbol": "BTC/USD",
+                         "qualified": False, "conditions": []})
+    result = watcher._scan_symbol("BTC/USD", positions=[])
+    assert result["setup_a"] is None
+    assert a_calls == []                   # evaluator never invoked
+    assert result["setup_b"]["qualified"] is False

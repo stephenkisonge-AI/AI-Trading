@@ -44,6 +44,33 @@ def test_format_alert_includes_regime_and_condition_count():
     assert "8/8 conditions passed" in msg
 
 
+def test_scan_summary_tolerates_retired_setup_a():
+    # setup_a is None while SCAN_SETUP_A is False (Phase 7 retirement).
+    from datetime import datetime, timezone
+    from src.notifier import format_scan_summary
+    scan_results = [{
+        "symbol": "ETH/USD", "regime": "BULLISH",
+        "setup_a": None,
+        "setup_b": {"setup": "B", "symbol": "ETH/USD", "qualified": True,
+                    "conditions": []},
+        "execution_notes": [],
+    }]
+    msg = format_scan_summary(
+        scan_results, errors=[],
+        run_started=datetime(2026, 7, 19, 8, 17, tzinfo=timezone.utc),
+        next_scan_eat="Sun 2026-07-19 15:17 EAT")
+    assert "GREEN LIGHT" in msg
+    assert "Setup B qualified" in msg
+    # And the stand-down path with both quiet.
+    scan_results[0]["setup_b"]["qualified"] = False
+    msg = format_scan_summary(
+        scan_results, errors=[],
+        run_started=datetime(2026, 7, 19, 8, 17, tzinfo=timezone.utc),
+        next_scan_eat="Sun 2026-07-19 15:17 EAT")
+    assert "STAND DOWN" in msg
+    assert "no entry" in msg
+
+
 def test_format_alert_includes_entry_stop_and_tp_levels():
     msg = format_setup_alert(_qualified_result("A"), regime="BULLISH")
     assert "Entry: ~3245" in msg

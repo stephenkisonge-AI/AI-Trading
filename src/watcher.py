@@ -101,10 +101,19 @@ def _drop_in_progress_candle(df, period: timedelta,
     return df[df.index <= cutoff].copy()
 
 
-def _scan_symbol(symbol: str, positions) -> dict:
-    """Pull data and run both setup evaluators for one symbol.
+# Setup A (pullback continuation) is RETIRED from live scanning as of
+# 2026-07-19: the Phase 6/7 replays showed negative expectancy in every
+# configuration tested, gross of fees included (docs/PHASE7_SETUP_B_REPLAY.md).
+# The evaluator and its tests remain in the repo for a future rework —
+# flip this to re-arm scanning after a replay proves a reworked Setup A.
+SCAN_SETUP_A = False
 
-    Returns: {"symbol": ..., "regime": ..., "setup_a": <result>, "setup_b": <result>}
+
+def _scan_symbol(symbol: str, positions) -> dict:
+    """Pull data and run the setup evaluators for one symbol.
+
+    Returns: {"symbol": ..., "regime": ..., "setup_a": <result|None>,
+    "setup_b": <result>} — setup_a is None while SCAN_SETUP_A is False.
     Raises on any error — caller wraps in try/except to keep scanning others.
     """
     daily_raw = get_bars(symbol, "1Day", limit=250)
@@ -118,7 +127,8 @@ def _scan_symbol(symbol: str, positions) -> dict:
     regime = classify_regime(daily)
     has_position = _has_open_position(symbol, positions)
 
-    setup_a = evaluate_setup_a(daily, h4, h1, symbol, has_position)
+    setup_a = (evaluate_setup_a(daily, h4, h1, symbol, has_position)
+               if SCAN_SETUP_A else None)
     setup_b = evaluate_setup_b(daily, h4, h1, symbol, has_position)
 
     return {
@@ -234,16 +244,18 @@ def main() -> int:
             result = _scan_symbol(symbol, positions)
             result["execution_notes"] = []
             scan_results.append(result)
+            setup_a_state = ("retired" if result["setup_a"] is None
+                             else result["setup_a"]["qualified"])
             summary = (
                 f"[watcher] {symbol}: regime={result['regime']} "
                 f"has_position={result['has_position']} "
-                f"setup_a_qualified={result['setup_a']['qualified']} "
+                f"setup_a_qualified={setup_a_state} "
                 f"setup_b_qualified={result['setup_b']['qualified']}"
             )
             print(summary)
 
             for setup_result in (result["setup_a"], result["setup_b"]):
-                if not setup_result["qualified"]:
+                if setup_result is None or not setup_result["qualified"]:
                     continue
 
                 message = format_setup_alert(

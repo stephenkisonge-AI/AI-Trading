@@ -111,6 +111,13 @@ Trading rules by regime:
 
 ### Entry Setup A — Pullback continuation
 
+> **STATUS: RETIRED from live scanning (2026-07-19).** The Phase 6/7
+> replays (docs/PHASE6_REPLAY.md, docs/PHASE7_SETUP_B_REPLAY.md) found
+> negative expectancy in every configuration tested — gross of fees
+> included. The spec below and its evaluator stay for a future rework;
+> re-arming requires a replay that clears the +0.2R gate, then flipping
+> `SCAN_SETUP_A` in src/watcher.py.
+
 Long entry triggers only when ALL of these are true:
 
 1. Daily regime is **bullish** or **improving neutral**.
