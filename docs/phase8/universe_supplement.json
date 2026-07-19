@@ -1,0 +1,847 @@
+{
+ "start": "2024-01-01 00:00:00+00:00",
+ "end": "2026-07-19 00:00:00+00:00",
+ "sensitivity": {
+  "exact": {
+   "conservative": {
+    "n": 27,
+    "n_truncated": 0,
+    "win_rate": 0.4074074074074074,
+    "mean_r_net": -0.13557234789916536,
+    "mean_r_gross": 0.0528305269744056,
+    "total_r_net": -3.6604533932774648,
+    "best_r": 3.0179685792039233,
+    "worst_r": -1.236903080872915,
+    "expectancy_complete_only": -0.13557234789916536,
+    "exit_mix": {
+     "stop": 27,
+     "tp1": 11,
+     "tp2": 6
+    }
+   },
+   "optimistic": {
+    "n": 27,
+    "n_truncated": 0,
+    "win_rate": 0.5555555555555556,
+    "mean_r_net": 0.03288480015180565,
+    "mean_r_gross": 0.22170987339141918,
+    "total_r_net": 0.8878896040987526,
+    "best_r": 2.2115506962732043,
+    "worst_r": -1.236903080872915,
+    "expectancy_complete_only": 0.03288480015180565,
+    "exit_mix": {
+     "stop": 27,
+     "tp1": 15,
+     "tp2": 5
+    }
+   }
+  },
+  "window": {
+   "conservative": {
+    "n": 0
+   },
+   "optimistic": {
+    "n": 0
+   }
+  }
+ },
+ "fee_rows": [
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "AAVE/USD",
+   "signal_ts": "2025-01-31 16:00:00+00:00",
+   "stop_distance_pct": 3.259655447534058,
+   "r_gross": -1.0,
+   "r_net": -1.151,
+   "fee_drag_r": 0.151,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BAT/USD",
+   "signal_ts": "2024-12-04 12:00:00+00:00",
+   "stop_distance_pct": 3.8123965381239695,
+   "r_gross": -1.0,
+   "r_net": -1.129,
+   "fee_drag_r": 0.129,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BAT/USD",
+   "signal_ts": "2024-12-04 20:00:00+00:00",
+   "stop_distance_pct": 4.020331692607871,
+   "r_gross": -1.0,
+   "r_net": -1.122,
+   "fee_drag_r": 0.122,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BCH/USD",
+   "signal_ts": "2024-03-25 08:00:00+00:00",
+   "stop_distance_pct": 2.470635967968004,
+   "r_gross": -1.0,
+   "r_net": -1.2,
+   "fee_drag_r": 0.2,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "BCH/USD",
+   "signal_ts": "2025-07-26 00:00:00+00:00",
+   "stop_distance_pct": 3.9842067480258514,
+   "r_gross": 0.75,
+   "r_net": 0.623,
+   "fee_drag_r": 0.127,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "CRV/USD",
+   "signal_ts": "2024-12-24 12:00:00+00:00",
+   "stop_distance_pct": 3.317687670668254,
+   "r_gross": 0.75,
+   "r_net": 0.597,
+   "fee_drag_r": 0.153,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "CRV/USD",
+   "signal_ts": "2025-01-30 16:00:00+00:00",
+   "stop_distance_pct": 2.4508537702082642,
+   "r_gross": -1.0,
+   "r_net": -1.202,
+   "fee_drag_r": 0.202,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "CRV/USD",
+   "signal_ts": "2025-07-26 20:00:00+00:00",
+   "stop_distance_pct": 2.7761041850118313,
+   "r_gross": 0.75,
+   "r_net": 0.568,
+   "fee_drag_r": 0.182,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-02-26 20:00:00+00:00",
+   "stop_distance_pct": 2.3289479382194025,
+   "r_gross": 2.36,
+   "r_net": 2.139,
+   "fee_drag_r": 0.221,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-03-24 08:00:00+00:00",
+   "stop_distance_pct": 3.042965021320129,
+   "r_gross": 3.19,
+   "r_net": 3.018,
+   "fee_drag_r": 0.172,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-11-13 20:00:00+00:00",
+   "stop_distance_pct": 4.775275053970394,
+   "r_gross": -1.0,
+   "r_net": -1.102,
+   "fee_drag_r": 0.102,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2025-01-15 20:00:00+00:00",
+   "stop_distance_pct": 3.2302974132958786,
+   "r_gross": 2.117,
+   "r_net": 1.957,
+   "fee_drag_r": 0.16,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2025-02-11 08:00:00+00:00",
+   "stop_distance_pct": 2.2550609944772013,
+   "r_gross": -1.0,
+   "r_net": -1.219,
+   "fee_drag_r": 0.219,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "DOT/USD",
+   "signal_ts": "2024-05-17 16:00:00+00:00",
+   "stop_distance_pct": 2.12448859508333,
+   "r_gross": -1.0,
+   "r_net": -1.233,
+   "fee_drag_r": 0.233,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-01-11 12:00:00+00:00",
+   "stop_distance_pct": 2.0885278425694964,
+   "r_gross": -1.0,
+   "r_net": -1.237,
+   "fee_drag_r": 0.237,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-03-25 20:00:00+00:00",
+   "stop_distance_pct": 2.1522150180811543,
+   "r_gross": -1.0,
+   "r_net": -1.23,
+   "fee_drag_r": 0.23,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-05-15 20:00:00+00:00",
+   "stop_distance_pct": 2.1726259004638098,
+   "r_gross": -1.0,
+   "r_net": -1.228,
+   "fee_drag_r": 0.228,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "SUSHI/USD",
+   "signal_ts": "2024-12-24 20:00:00+00:00",
+   "stop_distance_pct": 2.1102166449627062,
+   "r_gross": -1.0,
+   "r_net": -1.234,
+   "fee_drag_r": 0.234,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "UNI/USD",
+   "signal_ts": "2024-01-11 00:00:00+00:00",
+   "stop_distance_pct": 3.2439589539887415,
+   "r_gross": 0.75,
+   "r_net": 0.594,
+   "fee_drag_r": 0.156,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2024-09-30 04:00:00+00:00",
+   "stop_distance_pct": 2.27765726681127,
+   "r_gross": -1.0,
+   "r_net": -1.217,
+   "fee_drag_r": 0.217,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 2.1535775163181334,
+   "r_gross": 0.75,
+   "r_net": 0.516,
+   "fee_drag_r": 0.234,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-14 20:00:00+00:00",
+   "stop_distance_pct": 2.9942575881870317,
+   "r_gross": 2.384,
+   "r_net": 2.212,
+   "fee_drag_r": 0.173,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-18 00:00:00+00:00",
+   "stop_distance_pct": 2.726692403562625,
+   "r_gross": -1.0,
+   "r_net": -1.181,
+   "fee_drag_r": 0.181,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-05-13 00:00:00+00:00",
+   "stop_distance_pct": 2.411889513182194,
+   "r_gross": -1.0,
+   "r_net": -1.205,
+   "fee_drag_r": 0.205,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-05-13 16:00:00+00:00",
+   "stop_distance_pct": 2.3520369249156694,
+   "r_gross": -1.0,
+   "r_net": -1.21,
+   "fee_drag_r": 0.21,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-07-12 20:00:00+00:00",
+   "stop_distance_pct": 2.8378338896639344,
+   "r_gross": 1.867,
+   "r_net": 1.686,
+   "fee_drag_r": 0.181,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "conservative",
+   "symbol": "XTZ/USD",
+   "signal_ts": "2025-01-15 16:00:00+00:00",
+   "stop_distance_pct": 2.2215363305128073,
+   "r_gross": 1.758,
+   "r_net": 1.529,
+   "fee_drag_r": 0.229,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "AAVE/USD",
+   "signal_ts": "2025-01-31 16:00:00+00:00",
+   "stop_distance_pct": 3.259655447534058,
+   "r_gross": -1.0,
+   "r_net": -1.151,
+   "fee_drag_r": 0.151,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BAT/USD",
+   "signal_ts": "2024-12-04 12:00:00+00:00",
+   "stop_distance_pct": 3.8123965381239695,
+   "r_gross": 0.75,
+   "r_net": 0.617,
+   "fee_drag_r": 0.133,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BAT/USD",
+   "signal_ts": "2024-12-04 20:00:00+00:00",
+   "stop_distance_pct": 4.020331692607871,
+   "r_gross": 0.75,
+   "r_net": 0.624,
+   "fee_drag_r": 0.126,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BCH/USD",
+   "signal_ts": "2024-03-25 08:00:00+00:00",
+   "stop_distance_pct": 2.470635967968004,
+   "r_gross": -1.0,
+   "r_net": -1.2,
+   "fee_drag_r": 0.2,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "BCH/USD",
+   "signal_ts": "2025-07-26 00:00:00+00:00",
+   "stop_distance_pct": 3.9842067480258514,
+   "r_gross": 0.75,
+   "r_net": 0.623,
+   "fee_drag_r": 0.127,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "CRV/USD",
+   "signal_ts": "2024-12-24 12:00:00+00:00",
+   "stop_distance_pct": 3.317687670668254,
+   "r_gross": 0.75,
+   "r_net": 0.597,
+   "fee_drag_r": 0.153,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "CRV/USD",
+   "signal_ts": "2025-01-30 16:00:00+00:00",
+   "stop_distance_pct": 2.4508537702082642,
+   "r_gross": -1.0,
+   "r_net": -1.202,
+   "fee_drag_r": 0.202,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "CRV/USD",
+   "signal_ts": "2025-07-26 20:00:00+00:00",
+   "stop_distance_pct": 2.7761041850118313,
+   "r_gross": 0.75,
+   "r_net": 0.568,
+   "fee_drag_r": 0.182,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-02-26 20:00:00+00:00",
+   "stop_distance_pct": 2.3289479382194025,
+   "r_gross": 2.36,
+   "r_net": 2.139,
+   "fee_drag_r": 0.221,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-03-24 08:00:00+00:00",
+   "stop_distance_pct": 3.042965021320129,
+   "r_gross": 0.75,
+   "r_net": 0.584,
+   "fee_drag_r": 0.166,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2024-11-13 20:00:00+00:00",
+   "stop_distance_pct": 4.775275053970394,
+   "r_gross": 0.75,
+   "r_net": 0.643,
+   "fee_drag_r": 0.107,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2025-01-15 20:00:00+00:00",
+   "stop_distance_pct": 3.2302974132958786,
+   "r_gross": 2.117,
+   "r_net": 1.957,
+   "fee_drag_r": 0.16,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOGE/USD",
+   "signal_ts": "2025-02-11 08:00:00+00:00",
+   "stop_distance_pct": 2.2550609944772013,
+   "r_gross": -1.0,
+   "r_net": -1.219,
+   "fee_drag_r": 0.219,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "DOT/USD",
+   "signal_ts": "2024-05-17 16:00:00+00:00",
+   "stop_distance_pct": 2.12448859508333,
+   "r_gross": -1.0,
+   "r_net": -1.233,
+   "fee_drag_r": 0.233,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-01-11 12:00:00+00:00",
+   "stop_distance_pct": 2.0885278425694964,
+   "r_gross": -1.0,
+   "r_net": -1.237,
+   "fee_drag_r": 0.237,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-03-25 20:00:00+00:00",
+   "stop_distance_pct": 2.1522150180811543,
+   "r_gross": -1.0,
+   "r_net": -1.23,
+   "fee_drag_r": 0.23,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "GRT/USD",
+   "signal_ts": "2024-05-15 20:00:00+00:00",
+   "stop_distance_pct": 2.1726259004638098,
+   "r_gross": -1.0,
+   "r_net": -1.228,
+   "fee_drag_r": 0.228,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "SUSHI/USD",
+   "signal_ts": "2024-12-24 20:00:00+00:00",
+   "stop_distance_pct": 2.1102166449627062,
+   "r_gross": -1.0,
+   "r_net": -1.234,
+   "fee_drag_r": 0.234,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "UNI/USD",
+   "signal_ts": "2024-01-11 00:00:00+00:00",
+   "stop_distance_pct": 3.2439589539887415,
+   "r_gross": 0.75,
+   "r_net": 0.594,
+   "fee_drag_r": 0.156,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2024-09-30 04:00:00+00:00",
+   "stop_distance_pct": 2.27765726681127,
+   "r_gross": -1.0,
+   "r_net": -1.217,
+   "fee_drag_r": 0.217,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-02 12:00:00+00:00",
+   "stop_distance_pct": 2.1535775163181334,
+   "r_gross": 0.75,
+   "r_net": 0.516,
+   "fee_drag_r": 0.234,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-14 20:00:00+00:00",
+   "stop_distance_pct": 2.9942575881870317,
+   "r_gross": 2.384,
+   "r_net": 2.212,
+   "fee_drag_r": 0.173,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-01-18 00:00:00+00:00",
+   "stop_distance_pct": 2.726692403562625,
+   "r_gross": -1.0,
+   "r_net": -1.181,
+   "fee_drag_r": 0.181,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-05-13 00:00:00+00:00",
+   "stop_distance_pct": 2.411889513182194,
+   "r_gross": -1.0,
+   "r_net": -1.205,
+   "fee_drag_r": 0.205,
+   "exits": [
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-05-13 16:00:00+00:00",
+   "stop_distance_pct": 2.3520369249156694,
+   "r_gross": 0.75,
+   "r_net": 0.536,
+   "fee_drag_r": 0.214,
+   "exits": [
+    "tp1",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XRP/USD",
+   "signal_ts": "2025-07-12 20:00:00+00:00",
+   "stop_distance_pct": 2.8378338896639344,
+   "r_gross": 1.867,
+   "r_net": 1.686,
+   "fee_drag_r": 0.181,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  },
+  {
+   "variant": "exact",
+   "model": "optimistic",
+   "symbol": "XTZ/USD",
+   "signal_ts": "2025-01-15 16:00:00+00:00",
+   "stop_distance_pct": 2.2215363305128073,
+   "r_gross": 1.758,
+   "r_net": 1.529,
+   "fee_drag_r": 0.229,
+   "exits": [
+    "tp1",
+    "tp2",
+    "stop"
+   ]
+  }
+ ],
+ "regimes": {
+  "BTC/USD": {
+   "days": 931,
+   "counts": {
+    "BULLISH": 596,
+    "UNCLASSIFIED": 49,
+    "BEARISH": 256,
+    "IMPROVING_NEUTRAL": 30
+   },
+   "setup_a_eligible_pct": 67.23952738990333,
+   "setup_b_eligible_pct": 64.0171858216971
+  },
+  "ETH/USD": {
+   "days": 931,
+   "counts": {
+    "BULLISH": 391,
+    "UNCLASSIFIED": 68,
+    "BEARISH": 414,
+    "IMPROVING_NEUTRAL": 58
+   },
+   "setup_a_eligible_pct": 48.22771213748657,
+   "setup_b_eligible_pct": 41.99785177228786
+  },
+  "SOL/USD": {
+   "days": 931,
+   "counts": {
+    "INSUFFICIENT": 239,
+    "BULLISH": 265,
+    "UNCLASSIFIED": 48,
+    "BEARISH": 343,
+    "IMPROVING_NEUTRAL": 36
+   },
+   "setup_a_eligible_pct": 32.330827067669176,
+   "setup_b_eligible_pct": 28.464017185821696
+  },
+  "LINK/USD": {
+   "days": 931,
+   "counts": {
+    "BULLISH": 294,
+    "UNCLASSIFIED": 105,
+    "BEARISH": 483,
+    "IMPROVING_NEUTRAL": 49
+   },
+   "setup_a_eligible_pct": 36.8421052631579,
+   "setup_b_eligible_pct": 31.57894736842105
+  },
+  "AVAX/USD": {
+   "days": 931,
+   "counts": {
+    "BULLISH": 253,
+    "UNCLASSIFIED": 65,
+    "BEARISH": 581,
+    "IMPROVING_NEUTRAL": 32
+   },
+   "setup_a_eligible_pct": 30.612244897959183,
+   "setup_b_eligible_pct": 27.175080558539204
+  }
+ }
+}

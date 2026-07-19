@@ -61,12 +61,19 @@ Trade only these pairs. Add new pairs only if I approve.
 3. **SOL/USD** — alt L1, narrative-differentiated from BTC/ETH
 4. **LINK/USD** — oracle infra, sometimes decouples on coin-specific news
 5. **AVAX/USD** — alt L1, different consensus / subnet model
+6. **DOGE/USD** — added 2026-07-19, Phase 8 replay gate (+0.96R net,
+   n=5, both fill bounds)
+7. **UNI/USD** — added 2026-07-19, Phase 8 replay gate (thin n)
+8. **XTZ/USD** — added 2026-07-19, Phase 8 replay gate (thin n)
 
-Cap at 5 for now. Adding pairs increases setup frequency but does NOT
-reduce risk — everything in crypto is 70%+ correlated to BTC in down
-moves. More pairs = more decisions to ignore correctly during chop, not
-more diversification. No further additions until we have 30 closed
-trades of paper results across this universe.
+Additions happen ONLY through the replay gate: a candidate must show
+non-negative net expectancy at both fill bounds with the full
+9-condition checklist active (docs/PHASE8_UNIVERSE.md; user-approved
+2026-07-19 — this supersedes the earlier "cap at 5 until 30 closed
+trades" rule, which made the strategy unfalsifiable at ~3 signals a
+year). The correlation warning stands: adding pairs raises setup
+frequency, NOT diversification — everything in crypto is 70%+
+correlated to BTC in down moves.
 
 If a pair fails our no-trade conditions (spread > 0.5%, missing candles,
 repeated API errors) for 3+ consecutive scans, drop it from the active
@@ -312,9 +319,9 @@ For each scan, in this order:
    missing, fix immediately and tell me.
 4. **Regime classification** — pull daily bars, compute EMAs, output the
    current regime label.
-5. **Setup scan** — for each pair in the universe (BTC, ETH, and SOL if
-   enabled), evaluate Setup A and Setup B against the full checklist.
-   Tell me what you found.
+5. **Setup scan** — for each pair in the universe (all 8 active
+   pairs), evaluate Setup B against the full checklist (Setup A is
+   retired). Tell me what you found.
 6. **Risk gate** — verify we haven't hit daily/weekly loss caps or
    consecutive-loss cooldown.
 7. **Propose if anything qualified.** Otherwise, summarize and stand down.
@@ -521,7 +528,7 @@ to copy it somewhere durable.
 Please:
 
 1. Confirm you've read this whole document.
-2. State the 3 pairs in the universe (and which are active vs gated).
+2. State the 8 pairs in the universe (and which are active vs gated).
 3. State the 4 regime labels and the trading rule for each.
 4. State the 9 conditions for Setup A.
 5. State the 9 conditions for Setup B.

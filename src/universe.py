@@ -43,7 +43,14 @@ STOCKS_WITH_EARNINGS: set[str] = {s for s in UNIVERSE if s not in ETFS}
 # Crypto swing universe (src/watcher.py + src/trader.py). Kept here so the
 # two strands can tell their positions apart — they share one Alpaca paper
 # account, and each strand must only count/manage its own symbols.
-CRYPTO_SYMBOLS: list[str] = ["BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD"]
+# DOGE/UNI/XTZ added 2026-07-19 after passing the Phase 8 replay gate
+# (non-negative net expectancy at both fill bounds with the fee floor
+# active — docs/PHASE8_UNIVERSE.md). 13 other candidates failed or had
+# no signals; 11 more lack regime history and get rescreened later.
+CRYPTO_SYMBOLS: list[str] = [
+    "BTC/USD", "ETH/USD", "SOL/USD", "LINK/USD", "AVAX/USD",
+    "DOGE/USD", "UNI/USD", "XTZ/USD",
+]
 
 # Alpaca returns crypto position/order symbols without the slash (BTCUSD).
 CRYPTO_SYMBOLS_NO_SLASH: set[str] = {s.replace("/", "") for s in CRYPTO_SYMBOLS}

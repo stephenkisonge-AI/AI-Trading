@@ -1,0 +1,1751 @@
+{
+ "start": "2024-01-01 00:00:00+00:00",
+ "end": "2026-07-19 00:00:00+00:00",
+ "symbols": [
+  "AAVE/USD",
+  "BAT/USD",
+  "BCH/USD",
+  "CRV/USD",
+  "DOGE/USD",
+  "DOT/USD",
+  "GRT/USD",
+  "LTC/USD",
+  "PEPE/USD",
+  "SHIB/USD",
+  "SUSHI/USD",
+  "TRUMP/USD",
+  "UNI/USD",
+  "XRP/USD",
+  "XTZ/USD",
+  "YFI/USD"
+ ],
+ "setup": "B",
+ "stop_atr_floor": null,
+ "per_symbol": {
+  "AAVE/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 1,
+    "summary": {
+     "n": 1,
+     "n_truncated": 0,
+     "win_rate": 0.0,
+     "mean_r_net": -1.1508904451092377,
+     "mean_r_gross": -1.0,
+     "total_r_net": -1.1508904451092377,
+     "best_r": -1.1508904451092377,
+     "worst_r": -1.1508904451092377,
+     "expectancy_complete_only": -1.1508904451092377,
+     "exit_mix": {
+      "stop": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "AAVE/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-31 16:00:00+00:00",
+      "entry": 338.41,
+      "stop0": 327.379,
+      "atr0": 14.301156278956961,
+      "tp1": 354.9565,
+      "tp2": 371.50300000000004,
+      "tranches": [
+       [
+        1.0,
+        327.379,
+        "2025-01-31 18:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "AAVE/USD",
+        "bar_ts": "2025-01-31 18:00:00+00:00",
+        "stop": 327.379,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-31 18:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1509
+     }
+    ]
+   }
+  },
+  "BAT/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 2,
+    "summary": {
+     "n": 2,
+     "n_truncated": 0,
+     "win_rate": 0.0,
+     "mean_r_net": -1.1252594739445592,
+     "mean_r_gross": -1.0,
+     "total_r_net": -2.2505189478891183,
+     "best_r": -1.1218678477871222,
+     "worst_r": -1.128651100101996,
+     "expectancy_complete_only": -1.1252594739445592,
+     "exit_mix": {
+      "stop": 2
+     }
+    },
+    "trades": [
+     {
+      "symbol": "BAT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-12-04 12:00:00+00:00",
+      "entry": 0.360036,
+      "stop0": 0.34631,
+      "atr0": 0.025198408540500417,
+      "tp1": 0.38062500000000005,
+      "tp2": 0.40121400000000007,
+      "tranches": [
+       [
+        1.0,
+        0.34631,
+        "2024-12-04 16:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "BAT/USD",
+        "bar_ts": "2024-12-04 16:00:00+00:00",
+        "stop": 0.34631,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-12-04 16:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1287
+     },
+     {
+      "symbol": "BAT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-12-04 20:00:00+00:00",
+      "entry": 0.360816,
+      "stop0": 0.34631,
+      "atr0": 0.026230314666169922,
+      "tp1": 0.38257500000000005,
+      "tp2": 0.4043340000000001,
+      "tranches": [
+       [
+        1.0,
+        0.34631,
+        "2024-12-04 23:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "BAT/USD",
+        "bar_ts": "2024-12-04 23:00:00+00:00",
+        "stop": 0.34631,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-12-04 23:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1219
+     }
+    ]
+   }
+  },
+  "BCH/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 4,
+    "summary": {
+     "n": 2,
+     "n_truncated": 0,
+     "win_rate": 0.5,
+     "mean_r_net": -0.28862376893875685,
+     "mean_r_gross": -0.125,
+     "total_r_net": -0.5772475378775137,
+     "best_r": 0.6226295045045047,
+     "worst_r": -1.1998770423820184,
+     "expectancy_complete_only": -0.28862376893875685,
+     "exit_mix": {
+      "stop": 2,
+      "tp1": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "BCH/USD",
+      "variant": "exact",
+      "signal_ts": "2024-03-25 08:00:00+00:00",
+      "entry": 488.012,
+      "stop0": 475.955,
+      "atr0": 19.676297799075517,
+      "tp1": 506.0975,
+      "tp2": 524.183,
+      "tranches": [
+       [
+        1.0,
+        475.955,
+        "2024-03-25 11:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "BCH/USD",
+        "bar_ts": "2024-03-25 11:00:00+00:00",
+        "stop": 475.955,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-03-25 11:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1999
+     },
+     {
+      "symbol": "BCH/USD",
+      "variant": "exact",
+      "signal_ts": "2025-07-26 00:00:00+00:00",
+      "entry": 557.2,
+      "stop0": 535.0,
+      "atr0": 16.827659625623944,
+      "tp1": 590.5000000000001,
+      "tp2": 623.8000000000002,
+      "tranches": [
+       [
+        0.5,
+        590.5000000000001,
+        "2025-07-27 11:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.5,
+        557.2,
+        "2025-07-28 19:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-07-27 11:00:00+00:00"
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "BCH/USD",
+        "bar_ts": "2025-07-28 19:00:00+00:00",
+        "stop": 557.2,
+        "frac": 0.5,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-07-28 19:00:00+00:00",
+      "truncated": false,
+      "r_gross": 0.75,
+      "r_net": 0.6226
+     }
+    ]
+   }
+  },
+  "CRV/USD": {
+   "scans": 5197,
+   "exact": {
+    "signals": 6,
+    "summary": {
+     "n": 3,
+     "n_truncated": 0,
+     "win_rate": 0.6666666666666666,
+     "mean_r_net": -0.012025476252689979,
+     "mean_r_gross": 0.16666666666666632,
+     "total_r_net": -0.036076428758069934,
+     "best_r": 0.5974176249747655,
+     "worst_r": -1.2015105395425172,
+     "expectancy_complete_only": -0.012025476252689979,
+     "exit_mix": {
+      "tp1": 2,
+      "stop": 3
+     }
+    },
+    "trades": [
+     {
+      "symbol": "CRV/USD",
+      "variant": "exact",
+      "signal_ts": "2024-12-24 12:00:00+00:00",
+      "entry": 0.97045,
+      "stop0": 0.9382535,
+      "atr0": 0.06380570137571243,
+      "tp1": 1.0187447500000002,
+      "tp2": 1.0670395000000004,
+      "tranches": [
+       [
+        0.5,
+        1.0187447500000002,
+        "2024-12-24 17:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.5,
+        0.97045,
+        "2024-12-26 06:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2024-12-24 17:00:00+00:00"
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "CRV/USD",
+        "bar_ts": "2024-12-26 06:00:00+00:00",
+        "stop": 0.97045,
+        "frac": 0.5,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-12-26 06:00:00+00:00",
+      "truncated": false,
+      "r_gross": 0.75,
+      "r_net": 0.5974
+     },
+     {
+      "symbol": "CRV/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-30 16:00:00+00:00",
+      "entry": 0.7955595,
+      "stop0": 0.7760615,
+      "atr0": 0.035726125343560566,
+      "tp1": 0.8248065,
+      "tp2": 0.8540535,
+      "tranches": [
+       [
+        1.0,
+        0.7760615,
+        "2025-01-30 20:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "CRV/USD",
+        "bar_ts": "2025-01-30 20:00:00+00:00",
+        "stop": 0.7760615,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-30 20:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2015
+     },
+     {
+      "symbol": "CRV/USD",
+      "variant": "exact",
+      "signal_ts": "2025-07-26 20:00:00+00:00",
+      "entry": 1.07885,
+      "stop0": 1.0489,
+      "atr0": 0.054768722177340426,
+      "tp1": 1.1237750000000002,
+      "tp2": 1.1687000000000005,
+      "tranches": [
+       [
+        0.5,
+        1.1237750000000002,
+        "2025-07-26 21:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.5,
+        1.07885,
+        "2025-07-27 08:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-07-26 21:00:00+00:00"
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "CRV/USD",
+        "bar_ts": "2025-07-27 08:00:00+00:00",
+        "stop": 1.07885,
+        "frac": 0.5,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-07-27 08:00:00+00:00",
+      "truncated": false,
+      "r_gross": 0.75,
+      "r_net": 0.568
+     }
+    ]
+   }
+  },
+  "DOGE/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 7,
+    "summary": {
+     "n": 5,
+     "n_truncated": 0,
+     "win_rate": 0.6,
+     "mean_r_net": 0.9584690145058957,
+     "mean_r_gross": 1.13334570857003,
+     "total_r_net": 4.7923450725294785,
+     "best_r": 3.0179685792039233,
+     "worst_r": -1.2192234927234937,
+     "expectancy_complete_only": 0.9584690145058957,
+     "exit_mix": {
+      "tp1": 3,
+      "tp2": 3,
+      "stop": 5
+     }
+    },
+    "trades": [
+     {
+      "symbol": "DOGE/USD",
+      "variant": "exact",
+      "signal_ts": "2024-02-26 20:00:00+00:00",
+      "entry": 0.08890495,
+      "stop0": 0.0868344,
+      "atr0": 0.0013931768338456636,
+      "tp1": 0.09201077499999999,
+      "tp2": 0.09511659999999997,
+      "tranches": [
+       [
+        0.5,
+        0.09201077499999999,
+        "2024-02-27 08:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        0.09511659999999997,
+        "2024-02-27 09:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        0.0960266052402608,
+        "2024-02-28 02:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2024-02-27 08:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2024-02-27 09:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2024-02-27 11:00:00+00:00",
+        0.092843
+       ],
+       [
+        "trail_raise",
+        "2024-02-27 15:00:00+00:00",
+        0.094362
+       ],
+       [
+        "trail_raise",
+        "2024-02-27 19:00:00+00:00",
+        0.095372
+       ],
+       [
+        "trail_raise",
+        "2024-02-27 23:00:00+00:00",
+        0.096027
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "DOGE/USD",
+        "bar_ts": "2024-02-28 02:00:00+00:00",
+        "stop": 0.0960266052402608,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-02-28 02:00:00+00:00",
+      "truncated": false,
+      "r_gross": 2.3599,
+      "r_net": 2.1393
+     },
+     {
+      "symbol": "DOGE/USD",
+      "variant": "exact",
+      "signal_ts": "2024-03-24 08:00:00+00:00",
+      "entry": 0.173671763,
+      "stop0": 0.168386992,
+      "atr0": 0.008000612552717412,
+      "tp1": 0.1815989195,
+      "tp2": 0.189526076,
+      "tranches": [
+       [
+        0.5,
+        0.1815989195,
+        "2024-03-25 14:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        0.189526076,
+        "2024-03-27 22:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        0.20940226137609255,
+        "2024-03-29 07:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2024-03-25 14:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2024-03-27 22:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2024-03-27 23:00:00+00:00",
+        0.175807
+       ],
+       [
+        "trail_raise",
+        "2024-03-28 03:00:00+00:00",
+        0.188806
+       ],
+       [
+        "trail_raise",
+        "2024-03-28 07:00:00+00:00",
+        0.189024
+       ],
+       [
+        "trail_raise",
+        "2024-03-28 11:00:00+00:00",
+        0.201117
+       ],
+       [
+        "trail_raise",
+        "2024-03-28 15:00:00+00:00",
+        0.205866
+       ],
+       [
+        "trail_raise",
+        "2024-03-28 19:00:00+00:00",
+        0.209402
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "DOGE/USD",
+        "bar_ts": "2024-03-29 07:00:00+00:00",
+        "stop": 0.20940226137609255,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-03-29 07:00:00+00:00",
+      "truncated": false,
+      "r_gross": 3.1903,
+      "r_net": 3.018
+     },
+     {
+      "symbol": "DOGE/USD",
+      "variant": "exact",
+      "signal_ts": "2024-11-13 20:00:00+00:00",
+      "entry": 0.38447,
+      "stop0": 0.3661105,
+      "atr0": 0.036422446591112774,
+      "tp1": 0.41200924999999994,
+      "tp2": 0.4395484999999999,
+      "tranches": [
+       [
+        1.0,
+        0.3661105,
+        "2024-11-14 23:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "DOGE/USD",
+        "bar_ts": "2024-11-14 23:00:00+00:00",
+        "stop": 0.3661105,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-11-14 23:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1022
+     },
+     {
+      "symbol": "DOGE/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-15 20:00:00+00:00",
+      "entry": 0.3771015,
+      "stop0": 0.36492,
+      "atr0": 0.011349458631009151,
+      "tp1": 0.3953737499999999,
+      "tp2": 0.41364599999999985,
+      "tranches": [
+       [
+        0.5,
+        0.3953737499999999,
+        "2025-01-17 08:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        0.41364599999999985,
+        "2025-01-17 08:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        0.4071457603688783,
+        "2025-01-18 04:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-01-17 08:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2025-01-17 08:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2025-01-17 11:00:00+00:00",
+        0.393325
+       ],
+       [
+        "trail_raise",
+        "2025-01-17 15:00:00+00:00",
+        0.393552
+       ],
+       [
+        "trail_raise",
+        "2025-01-17 19:00:00+00:00",
+        0.396342
+       ],
+       [
+        "trail_raise",
+        "2025-01-17 23:00:00+00:00",
+        0.396849
+       ],
+       [
+        "trail_raise",
+        "2025-01-18 03:00:00+00:00",
+        0.407146
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "DOGE/USD",
+        "bar_ts": "2025-01-18 04:00:00+00:00",
+        "stop": 0.4071457603688783,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-18 04:00:00+00:00",
+      "truncated": false,
+      "r_gross": 2.1166,
+      "r_net": 1.9565
+     },
+     {
+      "symbol": "DOGE/USD",
+      "variant": "exact",
+      "signal_ts": "2025-02-11 08:00:00+00:00",
+      "entry": 0.2666225,
+      "stop0": 0.26061,
+      "atr0": 0.007366759033072314,
+      "tp1": 0.27564124999999995,
+      "tp2": 0.2846599999999999,
+      "tranches": [
+       [
+        1.0,
+        0.26061,
+        "2025-02-11 13:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "DOGE/USD",
+        "bar_ts": "2025-02-11 13:00:00+00:00",
+        "stop": 0.26061,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-02-11 13:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2192
+     }
+    ]
+   }
+  },
+  "DOT/USD": {
+   "scans": 5197,
+   "exact": {
+    "signals": 1,
+    "summary": {
+     "n": 1,
+     "n_truncated": 0,
+     "win_rate": 0.0,
+     "mean_r_net": -1.2328507574279954,
+     "mean_r_gross": -1.0,
+     "total_r_net": -1.2328507574279954,
+     "best_r": -1.2328507574279954,
+     "worst_r": -1.2328507574279954,
+     "expectancy_complete_only": -1.2328507574279954,
+     "exit_mix": {
+      "stop": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "DOT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-05-17 16:00:00+00:00",
+      "entry": 7.23986,
+      "stop0": 7.08605,
+      "atr0": 0.1364134193978345,
+      "tp1": 7.470575,
+      "tp2": 7.70129,
+      "tranches": [
+       [
+        1.0,
+        7.08605,
+        "2024-05-18 13:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "DOT/USD",
+        "bar_ts": "2024-05-18 13:00:00+00:00",
+        "stop": 7.08605,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-05-18 13:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2329
+     }
+    ]
+   }
+  },
+  "GRT/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 3,
+    "summary": {
+     "n": 3,
+     "n_truncated": 0,
+     "win_rate": 0.0,
+     "mean_r_net": -1.2314527121587127,
+     "mean_r_gross": -1.0,
+     "total_r_net": -3.694358136476138,
+     "best_r": -1.2276362604087805,
+     "worst_r": -1.236903080872915,
+     "expectancy_complete_only": -1.2314527121587127,
+     "exit_mix": {
+      "stop": 3
+     }
+    },
+    "trades": [
+     {
+      "symbol": "GRT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-01-11 12:00:00+00:00",
+      "entry": 0.186495,
+      "stop0": 0.1826,
+      "atr0": 0.0077417543454586365,
+      "tp1": 0.19233749999999997,
+      "tp2": 0.19817999999999994,
+      "tranches": [
+       [
+        1.0,
+        0.1826,
+        "2024-01-11 16:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "GRT/USD",
+        "bar_ts": "2024-01-11 16:00:00+00:00",
+        "stop": 0.1826,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-01-11 16:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2369
+     },
+     {
+      "symbol": "GRT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-03-25 20:00:00+00:00",
+      "entry": 0.4080215,
+      "stop0": 0.39924,
+      "atr0": 0.012505171491594068,
+      "tp1": 0.42119375,
+      "tp2": 0.434366,
+      "tranches": [
+       [
+        1.0,
+        0.39924,
+        "2024-03-26 14:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "GRT/USD",
+        "bar_ts": "2024-03-26 14:00:00+00:00",
+        "stop": 0.39924,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-03-26 14:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2298
+     },
+     {
+      "symbol": "GRT/USD",
+      "variant": "exact",
+      "signal_ts": "2024-05-15 20:00:00+00:00",
+      "entry": 0.30401,
+      "stop0": 0.297405,
+      "atr0": 0.01018648113705811,
+      "tp1": 0.31391750000000007,
+      "tp2": 0.3238250000000001,
+      "tranches": [
+       [
+        1.0,
+        0.297405,
+        "2024-05-16 13:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "GRT/USD",
+        "bar_ts": "2024-05-16 13:00:00+00:00",
+        "stop": 0.297405,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-05-16 13:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2276
+     }
+    ]
+   }
+  },
+  "LTC/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 0,
+    "summary": {
+     "n": 0
+    },
+    "trades": []
+   }
+  },
+  "PEPE/USD": {
+   "scans": 2017,
+   "exact": {
+    "signals": 0,
+    "summary": {
+     "n": 0
+    },
+    "trades": []
+   }
+  },
+  "SHIB/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 0,
+    "summary": {
+     "n": 0
+    },
+    "trades": []
+   }
+  },
+  "SUSHI/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 1,
+    "summary": {
+     "n": 1,
+     "n_truncated": 0,
+     "win_rate": 0.0,
+     "mean_r_net": -1.2344424964936889,
+     "mean_r_gross": -1.0,
+     "total_r_net": -1.2344424964936889,
+     "best_r": -1.2344424964936889,
+     "worst_r": -1.2344424964936889,
+     "expectancy_complete_only": -1.2344424964936889,
+     "exit_mix": {
+      "stop": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "SUSHI/USD",
+      "variant": "exact",
+      "signal_ts": "2024-12-24 20:00:00+00:00",
+      "entry": 1.6894,
+      "stop0": 1.65375,
+      "atr0": 0.08857280458974857,
+      "tp1": 1.742875,
+      "tp2": 1.79635,
+      "tranches": [
+       [
+        1.0,
+        1.65375,
+        "2024-12-24 22:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "SUSHI/USD",
+        "bar_ts": "2024-12-24 22:00:00+00:00",
+        "stop": 1.65375,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-12-24 22:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2344
+     }
+    ]
+   }
+  },
+  "TRUMP/USD": {
+   "scans": 2059,
+   "exact": {
+    "signals": 0,
+    "summary": {
+     "n": 0
+    },
+    "trades": []
+   }
+  },
+  "UNI/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 1,
+    "summary": {
+     "n": 1,
+     "n_truncated": 0,
+     "win_rate": 1.0,
+     "mean_r_net": 0.5939923469387763,
+     "mean_r_gross": 0.750000000000001,
+     "total_r_net": 0.5939923469387763,
+     "best_r": 0.5939923469387763,
+     "worst_r": 0.5939923469387763,
+     "expectancy_complete_only": 0.5939923469387763,
+     "exit_mix": {
+      "tp1": 1,
+      "stop": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "UNI/USD",
+      "variant": "exact",
+      "signal_ts": "2024-01-11 00:00:00+00:00",
+      "entry": 6.570675,
+      "stop0": 6.357525,
+      "atr0": 0.2273078872420334,
+      "tp1": 6.8904,
+      "tp2": 7.210124999999999,
+      "tranches": [
+       [
+        0.5,
+        6.8904,
+        "2024-01-11 12:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.5,
+        6.570675,
+        "2024-01-11 16:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2024-01-11 12:00:00+00:00"
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "UNI/USD",
+        "bar_ts": "2024-01-11 16:00:00+00:00",
+        "stop": 6.570675,
+        "frac": 0.5,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-01-11 16:00:00+00:00",
+      "truncated": false,
+      "r_gross": 0.75,
+      "r_net": 0.594
+     }
+    ]
+   }
+  },
+  "XRP/USD": {
+   "scans": 4381,
+   "exact": {
+    "signals": 14,
+    "summary": {
+     "n": 7,
+     "n_truncated": 0,
+     "win_rate": 0.42857142857142855,
+     "mean_r_net": -0.056997943881005465,
+     "mean_r_gross": 0.14309308038884597,
+     "total_r_net": -0.39898560716703824,
+     "best_r": 2.2115506962732043,
+     "worst_r": -1.2170238095238104,
+     "expectancy_complete_only": -0.056997943881005465,
+     "exit_mix": {
+      "stop": 7,
+      "tp1": 3,
+      "tp2": 2
+     }
+    },
+    "trades": [
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2024-09-30 04:00:00+00:00",
+      "entry": 0.6454,
+      "stop0": 0.6307,
+      "atr0": 0.012578414592509815,
+      "tp1": 0.6674499999999999,
+      "tp2": 0.6894999999999998,
+      "tranches": [
+       [
+        1.0,
+        0.6307,
+        "2024-09-30 10:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2024-09-30 10:00:00+00:00",
+        "stop": 0.6307,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2024-09-30 10:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.217
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-02 12:00:00+00:00",
+      "entry": 2.4053,
+      "stop0": 2.3535,
+      "atr0": 0.06408626629919896,
+      "tp1": 2.483,
+      "tp2": 2.5607,
+      "tranches": [
+       [
+        0.5,
+        2.483,
+        "2025-01-04 02:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.5,
+        2.4053,
+        "2025-01-04 15:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-01-04 02:00:00+00:00"
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-01-04 15:00:00+00:00",
+        "stop": 2.4053,
+        "frac": 0.5,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-04 15:00:00+00:00",
+      "truncated": false,
+      "r_gross": 0.75,
+      "r_net": 0.516
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-14 20:00:00+00:00",
+      "entry": 2.6818,
+      "stop0": 2.6015,
+      "atr0": 0.07483619070117602,
+      "tp1": 2.80225,
+      "tp2": 2.9226999999999994,
+      "tranches": [
+       [
+        0.5,
+        2.80225,
+        "2025-01-15 02:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        2.9226999999999994,
+        "2025-01-15 15:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        2.965900835732283,
+        "2025-01-16 00:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-01-15 02:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2025-01-15 15:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2025-01-15 15:00:00+00:00",
+        2.821783
+       ],
+       [
+        "trail_raise",
+        "2025-01-15 23:00:00+00:00",
+        2.965901
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-01-16 00:00:00+00:00",
+        "stop": 2.965900835732283,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-16 00:00:00+00:00",
+      "truncated": false,
+      "r_gross": 2.3845,
+      "r_net": 2.2116
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-18 00:00:00+00:00",
+      "entry": 3.2897,
+      "stop0": 3.2,
+      "atr0": 0.1193088937970842,
+      "tp1": 3.4242499999999993,
+      "tp2": 3.558799999999999,
+      "tranches": [
+       [
+        1.0,
+        3.2,
+        "2025-01-18 04:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-01-18 04:00:00+00:00",
+        "stop": 3.2,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-18 04:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.1809
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-05-13 00:00:00+00:00",
+      "entry": 2.5451,
+      "stop0": 2.483715,
+      "atr0": 0.07577204644895992,
+      "tp1": 2.6371775,
+      "tp2": 2.729255,
+      "tranches": [
+       [
+        1.0,
+        2.483715,
+        "2025-05-13 01:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-05-13 01:00:00+00:00",
+        "stop": 2.483715,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-05-13 01:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2048
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-05-13 16:00:00+00:00",
+      "entry": 2.54354,
+      "stop0": 2.483715,
+      "atr0": 0.08059270646689864,
+      "tp1": 2.6332775,
+      "tp2": 2.723015,
+      "tranches": [
+       [
+        1.0,
+        2.483715,
+        "2025-05-15 07:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-05-15 07:00:00+00:00",
+        "stop": 2.483715,
+        "frac": 1.0,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-05-15 07:00:00+00:00",
+      "truncated": false,
+      "r_gross": -1.0,
+      "r_net": -1.2101
+     },
+     {
+      "symbol": "XRP/USD",
+      "variant": "exact",
+      "signal_ts": "2025-07-12 20:00:00+00:00",
+      "entry": 2.73818,
+      "stop0": 2.660475,
+      "atr0": 0.09200059663997816,
+      "tp1": 2.8547374999999997,
+      "tp2": 2.9712949999999996,
+      "tranches": [
+       [
+        0.5,
+        2.8547374999999997,
+        "2025-07-13 17:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        2.9712949999999996,
+        "2025-07-14 08:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        2.8522985947578907,
+        "2025-07-15 02:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-07-13 17:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2025-07-14 08:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2025-07-14 11:00:00+00:00",
+        2.84568
+       ],
+       [
+        "trail_raise",
+        "2025-07-14 15:00:00+00:00",
+        2.851689
+       ],
+       [
+        "trail_raise",
+        "2025-07-14 19:00:00+00:00",
+        2.851746
+       ],
+       [
+        "trail_raise",
+        "2025-07-14 23:00:00+00:00",
+        2.852299
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "XRP/USD",
+        "bar_ts": "2025-07-15 02:00:00+00:00",
+        "stop": 2.8522985947578907,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-07-15 02:00:00+00:00",
+      "truncated": false,
+      "r_gross": 1.8672,
+      "r_net": 1.6863
+     }
+    ]
+   }
+  },
+  "XTZ/USD": {
+   "scans": 5197,
+   "exact": {
+    "signals": 1,
+    "summary": {
+     "n": 1,
+     "n_truncated": 0,
+     "win_rate": 1.0,
+     "mean_r_net": 1.5285795444530803,
+     "mean_r_gross": 1.7580441227368802,
+     "total_r_net": 1.5285795444530803,
+     "best_r": 1.5285795444530803,
+     "worst_r": 1.5285795444530803,
+     "expectancy_complete_only": 1.5285795444530803,
+     "exit_mix": {
+      "tp1": 1,
+      "tp2": 1,
+      "stop": 1
+     }
+    },
+    "trades": [
+     {
+      "symbol": "XTZ/USD",
+      "variant": "exact",
+      "signal_ts": "2025-01-15 16:00:00+00:00",
+      "entry": 1.32836,
+      "stop0": 1.29885,
+      "atr0": 0.038910262852263004,
+      "tp1": 1.3726249999999998,
+      "tp2": 1.4168899999999998,
+      "tranches": [
+       [
+        0.5,
+        1.3726249999999998,
+        "2025-01-16 12:00:00+00:00",
+        "tp1"
+       ],
+       [
+        0.25,
+        1.4168899999999998,
+        "2025-01-17 20:00:00+00:00",
+        "tp2"
+       ],
+       [
+        0.25,
+        1.3588195282478615,
+        "2025-01-18 05:00:00+00:00",
+        "stop"
+       ]
+      ],
+      "events": [
+       [
+        "breakeven",
+        "2025-01-16 12:00:00+00:00"
+       ],
+       [
+        "runner_start",
+        "2025-01-17 20:00:00+00:00"
+       ],
+       [
+        "trail_raise",
+        "2025-01-17 23:00:00+00:00",
+        1.35882
+       ]
+      ],
+      "stop_hits": [
+       {
+        "symbol": "XTZ/USD",
+        "bar_ts": "2025-01-18 05:00:00+00:00",
+        "stop": 1.3588195282478615,
+        "frac": 0.25,
+        "gap_open": false,
+        "variant": "exact"
+       }
+      ],
+      "exit_ts": "2025-01-18 05:00:00+00:00",
+      "truncated": false,
+      "r_gross": 1.758,
+      "r_net": 1.5286
+     }
+    ]
+   }
+  },
+  "YFI/USD": {
+   "scans": 5581,
+   "exact": {
+    "signals": 0,
+    "summary": {
+     "n": 0
+    },
+    "trades": []
+   }
+  }
+ },
+ "combined": {
+  "exact": {
+   "n": 27,
+   "n_truncated": 0,
+   "win_rate": 0.4074074074074074,
+   "mean_r_net": -0.13557234789916536,
+   "mean_r_gross": 0.0528305269744056,
+   "total_r_net": -3.6604533932774648,
+   "best_r": 3.0179685792039233,
+   "worst_r": -1.236903080872915,
+   "expectancy_complete_only": -0.13557234789916536,
+   "exit_mix": {
+    "stop": 27,
+    "tp1": 11,
+    "tp2": 6
+   }
+  }
+ },
+ "signal_counts": {
+  "exact": 41,
+  "window": 0,
+  "window_only": 0,
+  "scans": 79858
+ },
+ "stop_hits": [
+  {
+   "symbol": "AAVE/USD",
+   "bar_ts": "2025-01-31 18:00:00+00:00",
+   "stop": 327.379,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "BAT/USD",
+   "bar_ts": "2024-12-04 16:00:00+00:00",
+   "stop": 0.34631,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "BAT/USD",
+   "bar_ts": "2024-12-04 23:00:00+00:00",
+   "stop": 0.34631,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "BCH/USD",
+   "bar_ts": "2024-03-25 11:00:00+00:00",
+   "stop": 475.955,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "BCH/USD",
+   "bar_ts": "2025-07-28 19:00:00+00:00",
+   "stop": 557.2,
+   "frac": 0.5,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "CRV/USD",
+   "bar_ts": "2024-12-26 06:00:00+00:00",
+   "stop": 0.97045,
+   "frac": 0.5,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "CRV/USD",
+   "bar_ts": "2025-01-30 20:00:00+00:00",
+   "stop": 0.7760615,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "CRV/USD",
+   "bar_ts": "2025-07-27 08:00:00+00:00",
+   "stop": 1.07885,
+   "frac": 0.5,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOGE/USD",
+   "bar_ts": "2024-02-28 02:00:00+00:00",
+   "stop": 0.0960266052402608,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOGE/USD",
+   "bar_ts": "2024-03-29 07:00:00+00:00",
+   "stop": 0.20940226137609255,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOGE/USD",
+   "bar_ts": "2024-11-14 23:00:00+00:00",
+   "stop": 0.3661105,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOGE/USD",
+   "bar_ts": "2025-01-18 04:00:00+00:00",
+   "stop": 0.4071457603688783,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOGE/USD",
+   "bar_ts": "2025-02-11 13:00:00+00:00",
+   "stop": 0.26061,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "DOT/USD",
+   "bar_ts": "2024-05-18 13:00:00+00:00",
+   "stop": 7.08605,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "GRT/USD",
+   "bar_ts": "2024-01-11 16:00:00+00:00",
+   "stop": 0.1826,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "GRT/USD",
+   "bar_ts": "2024-03-26 14:00:00+00:00",
+   "stop": 0.39924,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "GRT/USD",
+   "bar_ts": "2024-05-16 13:00:00+00:00",
+   "stop": 0.297405,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "SUSHI/USD",
+   "bar_ts": "2024-12-24 22:00:00+00:00",
+   "stop": 1.65375,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "UNI/USD",
+   "bar_ts": "2024-01-11 16:00:00+00:00",
+   "stop": 6.570675,
+   "frac": 0.5,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2024-09-30 10:00:00+00:00",
+   "stop": 0.6307,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-01-04 15:00:00+00:00",
+   "stop": 2.4053,
+   "frac": 0.5,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-01-16 00:00:00+00:00",
+   "stop": 2.965900835732283,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-01-18 04:00:00+00:00",
+   "stop": 3.2,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-05-13 01:00:00+00:00",
+   "stop": 2.483715,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-05-15 07:00:00+00:00",
+   "stop": 2.483715,
+   "frac": 1.0,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XRP/USD",
+   "bar_ts": "2025-07-15 02:00:00+00:00",
+   "stop": 2.8522985947578907,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  },
+  {
+   "symbol": "XTZ/USD",
+   "bar_ts": "2025-01-18 05:00:00+00:00",
+   "stop": 1.3588195282478615,
+   "frac": 0.25,
+   "gap_open": false,
+   "variant": "exact"
+  }
+ ]
+}
