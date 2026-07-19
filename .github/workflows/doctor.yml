@@ -60,4 +60,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Read-only equity snapshot for the healthy note; the doctor
+          # degrades gracefully (no equity clause) if these are absent.
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+          ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}
         run: python -m src.doctor

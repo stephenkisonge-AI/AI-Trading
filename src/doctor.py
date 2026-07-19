@@ -259,13 +259,28 @@ def check_failed_runs(token: str, repo: str,
 
 # --- report ---------------------------------------------------------------
 
-def healthy_message(n_runs: int, lookback_minutes: int) -> str:
+def _fetch_equity() -> float | None:
+    """Paper-account equity for the healthy note. Any failure returns
+    None — an Alpaca hiccup must not break the health report."""
+    try:
+        from src.data import get_account
+        return float(get_account().equity)
+    except Exception as exc:                          # noqa: BLE001
+        print(f"[doctor] equity fetch failed: {exc}", file=sys.stderr)
+        return None
+
+
+def healthy_message(n_runs: int, lookback_minutes: int,
+                    equity: float | None = None) -> str:
     """Short all-clear note — sent on every healthy pass so the doctor's
     own liveness is visible (a silent doctor is indistinguishable from a
     dead one)."""
-    return (f"🩺 doctor ✓ all healthy — {n_runs} runs checked in the last "
-            f"{lookback_minutes // 60}h{lookback_minutes % 60:02d}m: "
-            f"dispatch ticks on schedule, no failed runs.")
+    msg = (f"🩺 doctor ✓ all healthy — {n_runs} runs checked in the last "
+           f"{lookback_minutes // 60}h{lookback_minutes % 60:02d}m: "
+           f"dispatch ticks on schedule, no failed runs.")
+    if equity is not None:
+        msg += f" Paper equity: ${equity:,.2f}."
+    return msg
 
 
 def build_report(findings: list[Finding]) -> str | None:
@@ -312,7 +327,8 @@ def main(argv=None) -> int:
     findings += check_failed_runs(token, repo, runs)
     report = build_report(findings)
     if report is None:
-        report = healthy_message(len(runs), args.lookback_minutes)
+        report = healthy_message(len(runs), args.lookback_minutes,
+                                 equity=_fetch_equity())
 
     print(report)
     if args.dry_run:

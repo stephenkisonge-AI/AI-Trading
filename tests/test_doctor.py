@@ -140,6 +140,11 @@ class TestReport:
         assert "all healthy" in msg
         assert "14 runs" in msg
         assert "6h40m" in msg
+        assert "equity" not in msg.lower()   # absent when fetch failed
+
+    def test_healthy_message_includes_equity_when_available(self):
+        msg = healthy_message(14, 400, equity=99469.2)
+        assert "Paper equity: $99,469.20." in msg
 
     def test_criticals_sort_first_and_fix_included(self):
         report = build_report([
