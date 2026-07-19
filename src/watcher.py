@@ -101,6 +101,21 @@ def _drop_in_progress_candle(df, period: timedelta,
     return df[df.index <= cutoff].copy()
 
 
+def _bullish_flips(scan_results: list[dict],
+                   prev_regimes: dict[str, str]) -> list[tuple]:
+    """[(symbol, old_regime, new_regime)] for coins whose daily regime
+    just transitioned INTO BULLISH since the previous persisted scan.
+    First-seen symbols (no previous record) don't count as flips, so a
+    universe addition can't spam alerts on its first scan.
+    """
+    return [
+        (r["symbol"], prev_regimes.get(r["symbol"]), r["regime"])
+        for r in scan_results
+        if r["regime"] == "BULLISH"
+        and prev_regimes.get(r["symbol"]) not in (None, "BULLISH")
+    ]
+
+
 # Setup A (pullback continuation) is RETIRED from live scanning as of
 # 2026-07-19: the Phase 6/7 replays showed negative expectancy in every
 # configuration tested, gross of fees included (docs/PHASE7_SETUP_B_REPLAY.md).
@@ -340,6 +355,28 @@ def main() -> int:
             print(f"[watcher] lifecycle: {lifecycle_stats}")
         except Exception as exc:
             print(f"[watcher] lifecycle summary failed: {exc}", file=sys.stderr)
+
+    # Regime-flip alert (user request 2026-07-19): message the moment
+    # any coin's daily regime turns BULLISH — that is Setup B armed.
+    # Compares against the PREVIOUS persisted telemetry record, so it
+    # must run before this scan's record is persisted below. Best
+    # effort: no journal or no prior telemetry -> silently skipped.
+    try:
+        if journal is not None:
+            from src.funnel import last_regimes
+            flips = _bullish_flips(scan_results, last_regimes(journal))
+            if flips:
+                flip_lines = ["🐂 REGIME TURNED BULLISH — Setup B is now "
+                              "armed for:"]
+                flip_lines += [f"• {sym}: {old} → {new}"
+                               for sym, old, new in flips]
+                sent = send_alert("\n".join(flip_lines))
+                print(f"[watcher] regime-flip alert "
+                      f"({[f[0] for f in flips]}): "
+                      f"{'OK' if sent else 'FAILED'}")
+    except Exception as exc:
+        print(f"[watcher] regime-flip check failed (non-blocking): {exc}",
+              file=sys.stderr)
 
     # Phase 5 — scan telemetry (instrumentation only, no rule changes).
     run_kind = os.environ.get("WATCHER_RUN_KIND", "primary")

@@ -51,6 +51,31 @@ def _scan_result(symbol="BTC/USD", regime="BULLISH", a_conditions=None,
     }
 
 
+def test_last_regimes_reads_most_recent_record(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from src.funnel import TELEMETRY_FILE, last_regimes
+    journal = SimpleNamespace(events_path=tmp_path / "events.jsonl")
+    telemetry = tmp_path / TELEMETRY_FILE
+    older = {"scan_ts": "2026-07-19T04:17:00+00:00", "evaluations": [
+        {"symbol": "BTC/USD", "regime": "BULLISH"}]}
+    newer = {"scan_ts": "2026-07-19T08:17:00+00:00", "evaluations": [
+        {"symbol": "BTC/USD", "regime": "BEARISH"},
+        {"symbol": "DOGE/USD", "regime": "BEARISH"}]}
+    telemetry.write_text(
+        json.dumps(older) + "\n" + json.dumps(newer) + "\n",
+        encoding="utf-8")
+    assert last_regimes(journal) == {"BTC/USD": "BEARISH",
+                                     "DOGE/USD": "BEARISH"}
+
+
+def test_last_regimes_empty_without_telemetry(tmp_path):
+    from types import SimpleNamespace
+    from src.funnel import last_regimes
+    journal = SimpleNamespace(events_path=tmp_path / "events.jsonl")
+    assert last_regimes(journal) == {}
+
+
 A_ORDER = [
     "daily_regime_bullish_or_improving",
     "h4_price_above_ema200",

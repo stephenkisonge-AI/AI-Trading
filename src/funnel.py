@@ -113,6 +113,21 @@ def load_records(journal: Journal) -> list[dict]:
     return out
 
 
+def last_regimes(journal: Journal) -> dict[str, str]:
+    """Symbol → regime label from the most recent persisted scan record.
+    Empty dict when no telemetry exists yet. Used by the watcher's
+    regime-flip alert to compare this scan against the previous one."""
+    records = load_records(journal)
+    if not records:
+        return {}
+    out: dict[str, str] = {}
+    for evaluation in records[-1].get("evaluations", []):
+        symbol = evaluation.get("symbol")
+        if symbol:
+            out[symbol] = evaluation.get("regime")
+    return out
+
+
 # =========================================================================
 # Aggregation
 # =========================================================================

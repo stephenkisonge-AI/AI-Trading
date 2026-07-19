@@ -70,6 +70,47 @@ def test_empty_df_passthrough():
 # SCAN_SETUP_A is False (Phase 7 evidence: docs/PHASE7_SETUP_B_REPLAY.md)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Regime-flip alert — fires only on a transition INTO BULLISH
+# ---------------------------------------------------------------------------
+
+def _scan_result(symbol: str, regime: str) -> dict:
+    return {"symbol": symbol, "regime": regime}
+
+
+class TestBullishFlips:
+    def test_flip_from_bearish_detected(self):
+        flips = watcher._bullish_flips(
+            [_scan_result("DOGE/USD", "BULLISH")],
+            {"DOGE/USD": "BEARISH"})
+        assert flips == [("DOGE/USD", "BEARISH", "BULLISH")]
+
+    def test_already_bullish_stays_quiet(self):
+        assert watcher._bullish_flips(
+            [_scan_result("DOGE/USD", "BULLISH")],
+            {"DOGE/USD": "BULLISH"}) == []
+
+    def test_first_seen_symbol_not_a_flip(self):
+        # A coin new to the universe must not alert on its first scan.
+        assert watcher._bullish_flips(
+            [_scan_result("XTZ/USD", "BULLISH")], {}) == []
+
+    def test_non_bullish_regimes_ignored(self):
+        assert watcher._bullish_flips(
+            [_scan_result("BTC/USD", "IMPROVING_NEUTRAL"),
+             _scan_result("ETH/USD", "BEARISH")],
+            {"BTC/USD": "BEARISH", "ETH/USD": "BEARISH"}) == []
+
+    def test_multiple_flips_batched(self):
+        flips = watcher._bullish_flips(
+            [_scan_result("BTC/USD", "BULLISH"),
+             _scan_result("ETH/USD", "BULLISH"),
+             _scan_result("SOL/USD", "BEARISH")],
+            {"BTC/USD": "CHOPPY_NEUTRAL", "ETH/USD": "BEARISH",
+             "SOL/USD": "BEARISH"})
+        assert [f[0] for f in flips] == ["BTC/USD", "ETH/USD"]
+
+
 def test_scan_symbol_skips_retired_setup_a(monkeypatch):
     assert watcher.SCAN_SETUP_A is False   # current production posture
     bars = pd.DataFrame(
