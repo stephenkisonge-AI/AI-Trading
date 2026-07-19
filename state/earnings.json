@@ -1,6 +1,6 @@
 {
   "_doc": "Upcoming earnings dates for the day-trade universe. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. Dates are ET local. Symbols not listed are exempt from the earnings filter (e.g., GLD).",
-  "refreshed_at": "2026-07-12T07:57:12Z",
+  "refreshed_at": "2026-07-19T07:56:36Z",
   "source": "finnhub_free",
   "earnings": {
     "AAPL": [
@@ -22,7 +22,7 @@
       "2026-07-22"
     ],
     "JPM": [
-      "2026-07-14"
+      "2026-10-13"
     ],
     "LLY": [
       "2026-08-05"
@@ -36,18 +36,14 @@
     "MU": [
       "2026-09-21"
     ],
-    "NFLX": [
-      "2026-07-16"
-    ],
+    "NFLX": [],
     "NVDA": [
       "2026-08-25"
     ],
     "TSLA": [
       "2026-07-22"
     ],
-    "UNH": [
-      "2026-07-16"
-    ],
+    "UNH": [],
     "V": [
       "2026-07-28"
     ],
