@@ -1,12 +1,8 @@
 {
   "_doc": "Tier-1 US economic events for the next ~35 days. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. datetime_et is the scheduled release time in ET with offset; the watcher's no-trade window is [event - 30 min, event + 30 min].",
-  "refreshed_at": "2026-08-09T06:36:08Z",
+  "refreshed_at": "2026-08-16T06:20:45Z",
   "source": "hardcoded_calendar",
   "events": [
-    {
-      "name": "CPI",
-      "datetime_et": "2026-08-13T08:30:00-04:00"
-    },
     {
       "name": "PCE",
       "datetime_et": "2026-08-28T08:30:00-04:00"
@@ -18,6 +14,10 @@
     {
       "name": "CPI",
       "datetime_et": "2026-09-10T08:30:00-04:00"
+    },
+    {
+      "name": "FOMC",
+      "datetime_et": "2026-09-16T14:00:00-04:00"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "_doc": "Upcoming earnings dates for the day-trade universe. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. Dates are ET local. Symbols not listed are exempt from the earnings filter (e.g., GLD).",
-  "refreshed_at": "2026-08-09T06:36:08Z",
+  "refreshed_at": "2026-08-16T06:20:45Z",
   "source": "finnhub_free",
   "earnings": {
     "AAPL": [
@@ -54,6 +54,8 @@
     "WMT": [
       "2026-08-20"
     ],
-    "XOM": []
+    "XOM": [
+      "2026-10-29"
+    ]
   }
 }
