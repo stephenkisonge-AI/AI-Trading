@@ -1,6 +1,6 @@
 {
   "_doc": "Upcoming earnings dates for the day-trade universe. Owned by .github/workflows/refresh-day-calendars.yml — do not hand-edit. Dates are ET local. Symbols not listed are exempt from the earnings filter (e.g., GLD).",
-  "refreshed_at": "2026-09-06T09:51:14Z",
+  "refreshed_at": "2026-09-13T10:45:25Z",
   "source": "finnhub_free",
   "earnings": {
     "AAPL": [
@@ -12,9 +12,12 @@
     "AMZN": [
       "2026-10-28"
     ],
-    "AVGO": [],
+    "AVGO": [
+      "2026-12-09"
+    ],
     "COST": [
-      "2026-09-24"
+      "2026-09-24",
+      "2026-12-09"
     ],
     "GOOGL": [
       "2026-10-27"
@@ -44,7 +47,7 @@
       "2026-10-20"
     ],
     "UNH": [
-      "2026-10-26"
+      "2026-10-09"
     ],
     "V": [
       "2026-10-26"
