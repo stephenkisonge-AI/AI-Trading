@@ -781,7 +781,7 @@ class _FlakyCloseClient(MgmtFakeClient):
         return super().close_position(symbol)
 
 
-def test_unprotected_position_is_flattened(_no_mgmt_waits):
+def test_management_flattens_an_unprotected_position(_no_mgmt_waits):
     pos = _open_position()
     client = MgmtFakeClient(orders=[_filled_buy_order()], positions=[pos])
     res = manage_position(
