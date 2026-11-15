@@ -4,10 +4,10 @@ Runs every 6 hours (doctor.yml) plus on demand. Two families of
 checks, both born from the 2026-07-11..13 incident where every visible
 run was green while the system was quietly degraded:
 
-1. PRIMARY-TRIGGER CADENCE — swing-manager's and day-watcher's primary
-   trigger is an external cron (cron-job.org) POSTing
-   repository_dispatch events; each workflow also has a native backup
-   schedule. When the external cron dies (expired PAT → 403 →
+1. PRIMARY-TRIGGER CADENCE — the primary trigger of swing-manager,
+   day-watcher and (since 2026-11-15) the crypto watcher is an external
+   cron (cron-job.org) POSTing repository_dispatch events; each
+   workflow also has a native backup schedule. When the external cron dies (expired PAT → 403 →
    cron-job.org auto-disables the job), runs stay green on the backup
    at ~1/3 cadence and nothing in-repo ever fails. The doctor watches
    for silence of the *dispatch* trigger specifically.
@@ -45,6 +45,10 @@ _HTTP_TIMEOUT_SEC = 30
 # inside the enforcement window is a dead trigger.
 SWING_DISPATCH_MAX_AGE = timedelta(minutes=75)
 DAY_DISPATCH_MAX_AGE = timedelta(minutes=30)
+# Crypto watcher ticks arrive every 4 h at :17 UTC; 5 h without one
+# means a slot was missed. Must stay below the doctor's lookback
+# (default 400 min) or a healthy tick could fall outside the window.
+WATCHER_DISPATCH_MAX_AGE = timedelta(minutes=300)
 
 # Day-watcher enforcement window: Mon–Fri 15:00–19:30 UTC. Regular US
 # cash hours are 13:30–20:00 UTC in summer and 14:30–21:00 in winter;
@@ -171,6 +175,24 @@ def check_dispatch_cadence(runs: list[dict], now: datetime) -> list[Finding]:
             "(~30–70 min), so crypto stop-watchdog/TP latency is "
             "degraded — runs still LOOK green.",
             _CRON_FIX.format(event_type="swing-manage-tick"),
+        ))
+
+    last = _latest_dispatch_success(runs, "Watcher")
+    if last is None or now - last > WATCHER_DISPATCH_MAX_AGE:
+        age = "never in the lookback window" if last is None else (
+            f"{int((now - last).total_seconds() // 60)} min ago")
+        findings.append(Finding(
+            "WARN",
+            "Crypto Watcher's PRIMARY trigger is silent: last successful "
+            f"crypto-watcher-tick dispatch was {age} (expected every 4 h "
+            "at :17 UTC). Entry scans are falling back to GitHub's native "
+            "schedule, which delays and drops ticks (17-22 scans/week "
+            "instead of 42) — those scans show as (FALLBACK) in Telegram.",
+            _CRON_FIX.format(event_type="crypto-watcher-tick")
+            + " If this job was never created, create it: POST to "
+            "https://api.github.com/repos/stephenkisonge-AI/AI-Trading/"
+            "dispatches at minute 17 of hours 0,4,8,12,16,20 UTC, with "
+            "the same headers as the swing-manage-tick job.",
         ))
 
     if _in_day_watch_window(now):

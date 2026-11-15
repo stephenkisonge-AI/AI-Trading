@@ -1,9 +1,14 @@
 """Watcher entry point. Runs every 4 hours on GitHub Actions (at :17 of
-00, 04, 08, 12, 16, 20 UTC), evaluates Setup A and Setup B on closed
-bars for each symbol, and pings Telegram only when something qualifies.
+00, 04, 08, 12, 16, 20 UTC — triggered by an external cron-job.org
+dispatch, with the native schedule as backup; see
+.github/workflows/watcher.yml), evaluates the live setups on closed
+bars for each symbol, and sends a Telegram summary every scan plus an
+alert when something qualifies.
 
-Never places orders. Trade execution always goes through Claude Code +
-Alpaca MCP with manual confirmation.
+Alerts-only unless WATCHER_AUTO_EXECUTE=true AND ALPACA_PAPER_TRADE=True,
+in which case qualifying setups are executed on the PAPER account
+through the journaled, fail-closed execution path (entry gates ->
+open_protected_trade). Live trading is never automated.
 """
 from __future__ import annotations
 
@@ -38,9 +43,10 @@ from src.swing_runtime import (
 # trader so both strands agree on which positions are "ours").
 from src.universe import CRYPTO_SYMBOLS as SYMBOLS
 
-# Cron schedule: every 4 hours at :17 UTC (see .github/workflows/watcher.yml).
-# Keep these in sync with the cron — they drive the "next scan" line in the
-# Telegram summary.
+# Scan slots: every 4 hours at :17 UTC (see .github/workflows/watcher.yml).
+# Keep these in sync with the cron-job.org job, the workflow's backup cron
+# and its slot guard — they drive the "next scan" line in the Telegram
+# summary.
 _CRON_UTC_HOURS = (0, 4, 8, 12, 16, 20)
 _CRON_UTC_MINUTE = 17
 _NAIROBI = timezone(timedelta(hours=3))

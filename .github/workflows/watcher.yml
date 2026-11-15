@@ -1,16 +1,23 @@
 name: Watcher
 
 on:
+  # PRIMARY — external cron (cron-job.org) POSTs
+  # {"event_type": "crypto-watcher-tick"} to /repos/{owner}/{repo}/dispatches
+  # at :17 past 00/04/08/12/16/20 UTC, same pattern as swing-manager.yml
+  # and day-watcher.yml. Aligned with the strategy's 4H setup-confirmation
+  # timeframe so each scan sees a freshly-closed 4H candle. Required
+  # because the free-tier native scheduler is best-effort: on the native
+  # schedule alone this workflow slid from 42 scans/week (Jul 2026) to
+  # 17-22 (Nov 2026), with a median gap of 8.8h instead of 4h.
+  repository_dispatch:
+    types: [crypto-watcher-tick]
+  # BACKUP — native schedule on the same slots, plus the old 14:00 UTC
+  # (17:00 EAT) safety net. A backup tick scans only when the current
+  # 4-hour slot has NOT already been covered (guard step below), so a
+  # healthy external cron never produces duplicate scans, and a dead one
+  # degrades to the old native cadence instead of to nothing.
   schedule:
-    # Primary: every 4 hours at :17 UTC (00:17, 04:17, 08:17, 12:17,
-    # 16:17, 20:17). Aligned with the strategy's 4H setup-confirmation
-    # timeframe so each scan sees a freshly-closed 4H candle. Off-the-hour
-    # minute dodges GitHub Actions free-tier scheduler lag at :00.
     - cron: '17 */4 * * *'
-    # Fallback: 14:00 UTC = 17:00 EAT. Fires only if NO scheduled run
-    # succeeded earlier today — guarded below via gh api lookup. With 6
-    # primary scans/day this almost always skips; it exists to cover the
-    # (rare) day when free-tier scheduler drops every single one.
     - cron: '0 14 * * *'
   workflow_dispatch:
     inputs:
@@ -54,22 +61,39 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
-      - name: Skip fallback if primary already ran today
+      - name: Skip backup tick if this 4h slot is already covered
         id: guard
-        if: github.event.schedule == '0 14 * * *'
+        if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          today=$(date -u +%Y-%m-%d)
-          count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/watcher.yml/runs?event=schedule&status=success&per_page=20" \
-            --jq "[.workflow_runs[] | select(.created_at | startswith(\"${today}\"))] | length")
-          echo "today=${today}"
-          echo "successful_schedule_runs_today=${count}"
-          if [ "${count}" -gt 0 ]; then
-            echo "Primary already ran today — skipping fallback."
+          # Slots are HH:17 UTC for HH in 0,4,...,20. Epoch 0 is midnight
+          # UTC, so 4-hour multiples of epoch seconds land on those hours.
+          now=$(date -u +%s)
+          slot=$(( (now - 1020) / 14400 * 14400 + 1020 ))
+          # 2 min of slack: the dispatch run can be created a moment
+          # before the slot boundary on clock skew.
+          since=$(date -u -d "@$(( slot - 120 ))" +%Y-%m-%dT%H:%M:%SZ)
+          # Covered = a dispatch run that succeeded or is still in flight
+          # (the primary never skips), or a schedule run that succeeded.
+          # In-flight schedule runs are not counted, so two backup ticks
+          # can never each skip in favor of the other.
+          covered=$(gh api -X GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/watcher.yml/runs" \
+            -f created=">=${since}" -f per_page=50 \
+            --jq "[.workflow_runs[]
+                   | select(.id != ${GITHUB_RUN_ID})
+                   | select((.event == \"repository_dispatch\"
+                             and (.conclusion == \"success\" or .status != \"completed\"))
+                            or (.event == \"schedule\" and .conclusion == \"success\"))]
+                  | length")
+          echo "slot_start=$(date -u -d "@${slot}" +%Y-%m-%dT%H:%M:%SZ)"
+          echo "runs_covering_slot=${covered}"
+          if [ "${covered}" -gt 0 ]; then
+            echo "Slot already covered — skipping backup tick."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No successful schedule run today — running fallback."
+            echo "Slot not covered — backup tick runs the scan."
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -99,7 +123,10 @@ jobs:
           ALPACA_PAPER_TRADE: ${{ secrets.ALPACA_PAPER_TRADE }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          WATCHER_RUN_KIND: ${{ github.event.schedule == '0 14 * * *' && 'fallback' || 'primary' }}
+          # 'fallback' = the native backup schedule had to do this scan
+          # because the external cron missed the slot; it shows as
+          # (FALLBACK) in the Telegram summary.
+          WATCHER_RUN_KIND: ${{ github.event_name == 'schedule' && 'fallback' || 'primary' }}
           # Phase 5a kill switch: set this GitHub Secret to "true" to enable
           # auto-execution of qualifying setups. Anything else (unset, "false",
           # etc.) keeps the watcher in alerts-only mode. Auto-execute also

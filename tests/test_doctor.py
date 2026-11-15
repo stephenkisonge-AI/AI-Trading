@@ -18,6 +18,13 @@ def _run(name: str, event: str, conclusion: str, created: datetime) -> dict:
             "id": 1}
 
 
+def _watcher_ok(now: datetime, minutes_ago: int = 60) -> dict:
+    """A healthy crypto-watcher dispatch tick, so tests about the other
+    workflows are not tripped by the watcher cadence check."""
+    return _run("Watcher", "repository_dispatch", "success",
+                now - timedelta(minutes=minutes_ago))
+
+
 # A weekday timestamp inside the day-watcher enforcement window
 # (2026-07-17 is a Friday), and one outside it (Saturday).
 FRI_MARKET = datetime(2026, 7, 17, 16, 0, tzinfo=UTC)
@@ -75,6 +82,7 @@ class TestCadence:
         runs = [
             _run("Swing Manager", "repository_dispatch", "success",
                  SATURDAY - timedelta(minutes=20)),
+            _watcher_ok(SATURDAY),
         ]
         assert check_dispatch_cadence(runs, SATURDAY) == []
 
@@ -85,7 +93,7 @@ class TestCadence:
             _run("Swing Manager", "schedule", "success",
                  SATURDAY - timedelta(minutes=m))
             for m in (10, 40, 70, 100)
-        ]
+        ] + [_watcher_ok(SATURDAY)]
         findings = check_dispatch_cadence(runs, SATURDAY)
         assert len(findings) == 1
         assert findings[0].severity == "CRITICAL"
@@ -95,6 +103,7 @@ class TestCadence:
         runs = [
             _run("Swing Manager", "repository_dispatch", "success",
                  SATURDAY - timedelta(minutes=90)),
+            _watcher_ok(SATURDAY),
         ]
         findings = check_dispatch_cadence(runs, SATURDAY)
         assert len(findings) == 1
@@ -104,6 +113,7 @@ class TestCadence:
         runs = [
             _run("Swing Manager", "repository_dispatch", "failure",
                  SATURDAY - timedelta(minutes=5)),
+            _watcher_ok(SATURDAY),
         ]
         assert len(check_dispatch_cadence(runs, SATURDAY)) == 1
 
@@ -111,11 +121,15 @@ class TestCadence:
         swing_ok = _run("Swing Manager", "repository_dispatch", "success",
                         FRI_MARKET - timedelta(minutes=10))
         # No day-watcher dispatches at all.
-        assert check_dispatch_cadence([swing_ok], FRI_MARKET) != []
+        findings = check_dispatch_cadence(
+            [swing_ok, _watcher_ok(FRI_MARKET)], FRI_MARKET)
+        assert len(findings) == 1
+        assert "day-watcher-tick" in findings[0].fix
         # Same silence on a Saturday -> only checked Mon-Fri.
         swing_ok_sat = _run("Swing Manager", "repository_dispatch",
                             "success", SATURDAY - timedelta(minutes=10))
-        assert check_dispatch_cadence([swing_ok_sat], SATURDAY) == []
+        assert check_dispatch_cadence(
+            [swing_ok_sat, _watcher_ok(SATURDAY)], SATURDAY) == []
 
     def test_day_watcher_fresh_tick_in_window_is_healthy(self):
         runs = [
@@ -123,8 +137,45 @@ class TestCadence:
                  FRI_MARKET - timedelta(minutes=10)),
             _run("Day Watcher", "repository_dispatch", "success",
                  FRI_MARKET - timedelta(minutes=5)),
+            _watcher_ok(FRI_MARKET),
         ]
         assert check_dispatch_cadence(runs, FRI_MARKET) == []
+
+    def test_crypto_watcher_silent_dispatch_warns(self):
+        # The Nov 2026 shape: watcher scans all green on the native
+        # schedule, no crypto-watcher-tick dispatch at all.
+        swing_ok = _run("Swing Manager", "repository_dispatch", "success",
+                        SATURDAY - timedelta(minutes=10))
+        runs = [swing_ok] + [
+            _run("Watcher", "schedule", "success",
+                 SATURDAY - timedelta(minutes=m)) for m in (30, 300)
+        ]
+        findings = check_dispatch_cadence(runs, SATURDAY)
+        assert len(findings) == 1
+        assert findings[0].severity == "WARN"
+        assert "crypto-watcher-tick" in findings[0].fix
+        assert "never in the lookback window" in findings[0].problem
+
+    def test_crypto_watcher_tick_within_five_hours_is_healthy(self):
+        swing_ok = _run("Swing Manager", "repository_dispatch", "success",
+                        SATURDAY - timedelta(minutes=10))
+        assert check_dispatch_cadence(
+            [swing_ok, _watcher_ok(SATURDAY, minutes_ago=250)], SATURDAY) == []
+        late = check_dispatch_cadence(
+            [swing_ok, _watcher_ok(SATURDAY, minutes_ago=310)], SATURDAY)
+        assert len(late) == 1 and "310 min ago" in late[0].problem
+
+    def test_watcher_name_does_not_match_day_watcher(self):
+        # "Day Watcher" dispatches must not satisfy the "Watcher" check.
+        runs = [
+            _run("Swing Manager", "repository_dispatch", "success",
+                 SATURDAY - timedelta(minutes=10)),
+            _run("Day Watcher", "repository_dispatch", "success",
+                 SATURDAY - timedelta(minutes=5)),
+        ]
+        findings = check_dispatch_cadence(runs, SATURDAY)
+        assert len(findings) == 1
+        assert "crypto-watcher-tick" in findings[0].fix
 
 
 # ---------------------------------------------------------------------------
