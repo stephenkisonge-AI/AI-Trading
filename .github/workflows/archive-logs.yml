@@ -1,0 +1,87 @@
+name: Archive logs
+
+# GitHub deletes a run's logs after 90 days. The day-trade strand keeps
+# no journal, so a run's stdout is the only record of WHY a management
+# action did or did not happen — the MU loss of 2026-07-15 could not be
+# read from its logs four months later because they had expired.
+#
+# Once a day this copies the logs of every completed run (all
+# workflows) into the `logs` branch of the private AI-Trading-State
+# repository, as plain text: <workflow>/<YYYY>/<YYYY-MM-DD>.log.
+#
+# A separate branch, not `main`: the trading workflows clone `main` on
+# every run and must not download the log archive, and a push here can
+# never race a journal push.
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'How many UTC days back to archive (logs older than 90 days are gone)'
+        type: string
+        default: '7'
+
+permissions:
+  contents: read
+  actions: read   # list runs + download their logs
+
+# Its own group — NOT the trading group. A run queued behind a trading
+# run would replace any trading run already pending there.
+concurrency:
+  group: archive-logs
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone the logs branch of the private state repository
+        id: clone
+        env:
+          STATE_REPO_TOKEN: ${{ secrets.STATE_REPO_TOKEN }}
+        run: |
+          if [ -z "${STATE_REPO_TOKEN}" ]; then
+            echo "::error::STATE_REPO_TOKEN is not set — nowhere to archive logs to."
+            exit 1
+          fi
+          git clone --quiet --depth 1 --single-branch --branch logs \
+            "https://x-access-token:${STATE_REPO_TOKEN}@github.com/${GITHUB_REPOSITORY_OWNER}/AI-Trading-State.git" \
+            "${RUNNER_TEMP}/logs-repo"
+          git -C "${RUNNER_TEMP}/logs-repo" config user.name "log-archiver[bot]"
+          git -C "${RUNNER_TEMP}/logs-repo" config user.email "log-archiver@users.noreply.github.com"
+
+      # Stdlib only — no dependency install. The default 7-day lookback
+      # re-checks days already archived (cheap: one list call per day),
+      # so a few dropped schedule ticks lose nothing.
+      - name: Archive run logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_DAYS: ${{ github.event.inputs.days || '7' }}
+        run: python3 scripts/archive_logs.py --out "${RUNNER_TEMP}/logs-repo" --days "${ARCHIVE_DAYS}"
+
+      # Runs even if the archive step failed part-way: every day file it
+      # wrote is complete, so partial progress is worth keeping.
+      - name: Commit and push
+        if: always() && steps.clone.outcome == 'success'
+        working-directory: ${{ runner.temp }}/logs-repo
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing new to archive."
+            exit 0
+          fi
+          git commit --quiet -m "logs: archive through $(date -u +%Y-%m-%dT%H:%MZ)"
+          for attempt in 1 2 3 4; do
+            if git push --quiet; then
+              echo "Pushed."
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}) — rebasing onto the remote."
+            git pull --quiet --rebase
+          done
+          echo "::error::could not push the log archive after 4 attempts."
+          exit 1

@@ -60,6 +60,7 @@ state calendars.
 |---|---|---|
 | Code, workflows, strategy docs, state calendars | GitHub repo | yes — workspace root is the repo checkout (incl. `.git`), may be stale vs GitHub |
 | Crypto trade journal + scan telemetry (`swing/`) | private GitHub repo `AI-Trading-State` | no — lives on GitHub; clone it OUTSIDE this working tree when you need to read it |
+| Run-log archive (every workflow's logs, one text file per workflow per UTC day) | `logs` branch of `AI-Trading-State`, written daily by the `Archive logs` workflow | no — lives on GitHub. GitHub itself deletes run logs after 90 days, so for anything older read this branch: `git clone --branch logs --single-branch` it OUTSIDE this working tree |
 | Local secrets (`.env`: Alpaca keys, paper flag, Telegram token+chat) | local only | **yes — `.env` at workspace root; the zip is the only other copy** |
 | GitHub Actions secrets (see list below) | GitHub repo settings | no — survive with the repo |
 | Claude Code memory + session transcripts | `~\.claude\projects\C--Users-StephenAI-AI-Trading\` | yes — installed 2026-07-09 |
@@ -135,8 +136,11 @@ state calendars.
    <id> --log` on a Watcher run prints `[watcher] auto-execute enabled:`
    (GitHub masks the word `True` as `***`; `False` prints in clear) and a
    Day Watcher run prints the equivalent line.
-   Then confirm all 5 workflows are active: `gh workflow list` (Watcher,
-   Swing Manager, Day Watcher, Doctor, Refresh day-trade calendars).
+   Then confirm all 6 workflows are active: `gh workflow list` (Watcher,
+   Swing Manager, Day Watcher, Doctor, Refresh day-trade calendars,
+   Archive logs). `Archive logs` needs the `logs` branch to exist in
+   `AI-Trading-State`; if that repo was re-created, make an empty
+   orphan branch named `logs` there first.
 
 8. **Re-arm the external cron** (only if the repo was re-created or the
    cron-job.org account was lost — otherwise it's still running): GitHub's
