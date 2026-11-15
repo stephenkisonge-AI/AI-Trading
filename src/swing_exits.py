@@ -50,6 +50,7 @@ from src.execution import (
     order_filled_qty,
     order_status_str,
     persist_submit_verify,
+    price_decimals_for,
     resolve_entry_fill,
     resolve_unresolved_intent,
     unwind_trade,
@@ -74,8 +75,13 @@ TP1_R = 1.5
 TP2_R = 3.0
 TP1_FRACTION = 0.5
 TP2_FRACTION = 0.25
-_PRICE_DECIMALS = 2
 QTY_TOLERANCE = 1e-9
+# Alpaca charges the crypto BUY fee in kind: the position is credited
+# net of the fee (live-verified 2026-11-15 — 0.007655 BTC filled, the
+# position held 0.007635862, i.e. 0.25% less). A shortfall up to this
+# fraction of the fill is journaled as the entry fee; anything larger
+# is not a fee and is left for reconciliation to flag.
+MAX_ENTRY_FEE_FRACTION = 0.01
 # A quote older than this cannot trigger a TP transition or the gap
 # watchdog — a stale observation is not an executable one.
 MAX_QUOTE_AGE_SEC = 120.0
@@ -158,7 +164,7 @@ def size_position_at_limit(equity: float, entry_hint: float,
         return out
     approved_risk = equity * _RISK_PER_TRADE_PCT
     stop_limit_price = round(structural_stop * (1 - config.stop_limit_offset_pct),
-                             _PRICE_DECIMALS)
+                             price_decimals_for(structural_stop))
     risk_per_unit_at_limit = entry_hint - stop_limit_price
     if risk_per_unit_at_limit <= 0:
         out["skip_reason"] = "stop-limit price at/above entry"
@@ -205,9 +211,10 @@ def _place_verified_stop(client, journal, *, trade_id: str, symbol: str,
     if qty is None or qty <= 0:
         out["unverified_reason"] = f"position unreadable or flat (qty={qty})"
     else:
-        stop_px = round(stop_price, _PRICE_DECIMALS)
+        decimals = price_decimals_for(stop_price)
+        stop_px = round(stop_price, decimals)
         limit_px = round(stop_price * (1 - config.stop_limit_offset_pct),
-                         _PRICE_DECIMALS)
+                         decimals)
         leg = next_leg(journal, trade_id, "stop")
         coid = make_client_order_id(STRAND, symbol, setup, signal_ts,
                                     "stop", leg)
@@ -245,6 +252,25 @@ def _place_verified_stop(client, journal, *, trade_id: str, symbol: str,
                  f"{symbol}: {out['unverified_reason']}. Entries frozen; "
                  f"trade {trade_id} needs reconciliation.")
     return out
+
+
+def _net_entry_qty(client, symbol_no_slash: str,
+                   filled_qty: float) -> tuple[float, float]:
+    """(net_position_qty, entry_fee_qty) right after an entry fill.
+
+    The broker position is the source of truth. A shortfall versus the
+    fill within MAX_ENTRY_FEE_FRACTION is the in-kind fee. Anything else
+    (position unreadable, no shortfall, or a shortfall too large to be a
+    fee) reports a zero fee and the gross fill, so the mismatch stays
+    visible to reconciliation instead of being explained away here.
+    """
+    position_qty = _position_qty(client, symbol_no_slash)
+    if position_qty is None or position_qty <= QTY_TOLERANCE:
+        return filled_qty, 0.0
+    fee_qty = filled_qty - position_qty
+    if fee_qty <= QTY_TOLERANCE or fee_qty > filled_qty * MAX_ENTRY_FEE_FRACTION:
+        return filled_qty, 0.0
+    return position_qty, fee_qty
 
 
 # =========================================================================
@@ -333,7 +359,7 @@ def open_protected_trade(client, journal, *, symbol: str, setup: str,
         approved_risk_dollars=approved_risk, filled_qty=filled_qty,
         avg_fill_price=avg_price, tp1_r=TP1_R, tp2_r=TP2_R,
         min_qty_increment=min_qty_increment(symbol), config=config,
-        price_decimals=_PRICE_DECIMALS)
+        price_decimals=price_decimals_for(structural_stop))
     if not validation.ok:
         unwind = unwind_trade(
             client, journal, trade_id=trade_id, symbol=symbol, strand=STRAND,
@@ -345,8 +371,12 @@ def open_protected_trade(client, journal, *, symbol: str, setup: str,
         return result
 
     # --- 8-9. persist TP levels as INTENDED levels only -------------------
-    tp1_qty = _round_qty_down(symbol, filled_qty * TP1_FRACTION)
-    tp2_qty = _round_qty_down(symbol, filled_qty * TP2_FRACTION)
+    # Tranches and the journal's expected position are based on what the
+    # broker actually credited (fill net of the in-kind entry fee).
+    net_qty, entry_fee_qty = _net_entry_qty(client, symbol_no_slash,
+                                            filled_qty)
+    tp1_qty = _round_qty_down(symbol, net_qty * TP1_FRACTION)
+    tp2_qty = _round_qty_down(symbol, net_qty * TP2_FRACTION)
     persisted = journal.record_trade_planned(
         trade_id, symbol=symbol, setup=setup,
         signal_bar_ts=str(signal_ts), planned_entry=planned_entry,
@@ -358,6 +388,7 @@ def open_protected_trade(client, journal, *, symbol: str, setup: str,
         actual_risk_dollars=validation.actual_risk_dollars,
         tp1_price=validation.tp1, tp2_price=validation.tp2,
         tp1_qty=tp1_qty, tp2_qty=tp2_qty,
+        entry_fee_qty=entry_fee_qty, net_position_qty=net_qty,
         entry_filled_at=_now_iso(),
         # No resting TP orders — these are application-managed levels.
         tp_management="application")

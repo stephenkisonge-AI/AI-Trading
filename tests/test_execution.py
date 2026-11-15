@@ -14,6 +14,7 @@ from src.execution import (
     make_trade_id,
     next_leg,
     persist_submit_verify,
+    price_decimals_for,
     resolve_entry_fill,
     resolve_unresolved_intent,
     unwind_trade,
@@ -683,3 +684,28 @@ def test_unwind_unconfirmed_cancel_goes_recovery(journal, clock):
     assert journal.entry_freeze()["frozen"] is True
     assert any("CRITICAL" in a for a in alerts)
     assert client.submitted == []  # no sell while state is unresolved
+
+
+# ---------------------------------------------------------------------------
+# order-price precision
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("price, expected", [
+    (65273.14, 2),    # BTC — unchanged from the old flat two decimals
+    (1826.4, 2),      # ETH — unchanged
+    (72.1, 3),        # SOL
+    (9.244, 4),       # LINK
+    (5.152, 4),       # UNI
+    (0.21493, 5),     # XTZ
+    (0.0588572, 6),   # DOGE
+    (0.000012, 9),    # capped at Alpaca's 1e-9 price increment
+])
+def test_price_decimals_keep_five_significant_figures(price, expected):
+    assert price_decimals_for(price) == expected
+    # Rounding at that precision moves the price by less than 0.01%.
+    assert abs(round(price, expected) - price) / price < 1e-4 or expected == 9
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, None, float("nan"), float("inf")])
+def test_price_decimals_fall_back_to_two_for_unusable_prices(bad):
+    assert price_decimals_for(bad) == 2

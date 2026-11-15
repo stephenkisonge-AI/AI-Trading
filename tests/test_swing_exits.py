@@ -13,6 +13,7 @@ from alpaca.trading.requests import MarketOrderRequest, StopLimitOrderRequest
 
 from src.execution import ExecConfig, make_client_order_id, make_trade_id
 from src.journal import Journal
+from src.reconciliation import reconcile
 from src.swing_exits import (
     check_sell_invariant,
     fresh_bid,
@@ -68,6 +69,9 @@ class Broker:
         self.market_sell_hang = False
         self.fail_on_submit_n: int | None = None
         self._submit_count = 0
+        # Alpaca charges crypto BUY fees in kind: the position is
+        # credited net of this fraction of the fill.
+        self.buy_fee_fraction = 0.0
 
     # -- invariant: checked after every mutation --------------------------
     def assert_invariant(self):
@@ -103,7 +107,8 @@ class Broker:
             price if price is not None else self.prices[order.symbol])
         order.status = ("filled" if abs(fill_qty - float(order.qty)) < 1e-12
                         else "partially_filled")
-        delta = -fill_qty if _is_sell(order) else fill_qty
+        delta = (-fill_qty if _is_sell(order)
+                 else fill_qty * (1 - self.buy_fee_fraction))
         new_qty = self.positions.get(order.symbol, 0.0) + delta
         if new_qty <= 1e-12:
             self.positions.pop(order.symbol, None)
@@ -381,6 +386,100 @@ def test_entry_duplicate_signal_skipped(journal, broker, clock):
     second = _entry(broker, journal, clock)
     assert second["status"] == "skipped"
     assert len(broker.orders) == orders_before
+
+
+def _reconcile(broker, journal):
+    open_orders = [o for o in broker.orders.values()
+                   if o.status in OPEN_STATUSES]
+    recent = [o for o in broker.orders.values()
+              if o.status not in OPEN_STATUSES]
+    positions = [SimpleNamespace(symbol=sym, qty=str(qty))
+                 for sym, qty in broker.positions.items()]
+    return reconcile(journal, positions, open_orders, recent)
+
+
+def test_entry_fee_in_kind_is_journaled_and_reconciles(journal, broker, clock):
+    """Live finding 2026-11-15: Alpaca credits a crypto buy NET of its
+    fee, so position < fill. The journal must expect the net quantity
+    or every later reconciliation reports QTY_MISMATCH and freezes
+    entries."""
+    broker.buy_fee_fraction = 0.0025
+    result = _entry(broker, journal, clock)
+    assert result["status"] == "protected", result
+    view = journal.trades()[result["trade_id"]]
+    gross = result["filled_qty"]
+    net = broker.positions[SYM_NS]
+    assert net == pytest.approx(gross * 0.9975)
+    assert view.plan["entry_fee_qty"] == pytest.approx(gross * 0.0025)
+    assert view.plan["net_position_qty"] == pytest.approx(net)
+    assert view.expected_position_qty() == pytest.approx(net, abs=1e-9)
+    # Tranches are cut from what the broker actually holds.
+    assert view.plan["tp1_qty"] <= net * 0.5 + 1e-9
+    # The stop covers exactly the net position, and reconciliation is clean.
+    sells = broker.open_sells(SYM_NS)
+    assert len(sells) == 1
+    assert float(sells[0].qty) == pytest.approx(net)
+    report = _reconcile(broker, journal)
+    assert report.ok, report.render()
+
+
+def test_entry_without_fee_journals_zero_fee(journal, broker, clock):
+    result = _entry(broker, journal, clock)
+    view = journal.trades()[result["trade_id"]]
+    assert view.plan["entry_fee_qty"] == 0.0
+    assert view.expected_position_qty() == pytest.approx(
+        broker.positions[SYM_NS])
+    assert _reconcile(broker, journal).ok
+
+
+def test_entry_shortfall_too_large_for_a_fee_stays_a_mismatch(
+        journal, broker, clock):
+    """A 5% shortfall is not a fee. It must not be explained away —
+    reconciliation keeps flagging it."""
+    broker.buy_fee_fraction = 0.05
+    result = _entry(broker, journal, clock)
+    view = journal.trades()[result["trade_id"]]
+    assert view.plan["entry_fee_qty"] == 0.0
+    report = _reconcile(broker, journal)
+    assert not report.ok
+    assert any(f.code == "QTY_MISMATCH" for f in report.findings)
+
+
+def test_fee_adjusted_trade_closes_flat_through_regime_exit(
+        journal, broker, clock):
+    broker.buy_fee_fraction = 0.0025
+    result = _entry(broker, journal, clock)
+    actions = _manage(broker, journal, clock, bid=100.0, regime="BEARISH")
+    assert _kinds(actions) == ["mgmt_close"]
+    assert SYM_NS not in broker.positions
+    assert journal.trades()[result["trade_id"]].is_terminal()
+    assert _reconcile(broker, journal).ok
+
+
+def test_sub_dollar_coin_keeps_stop_below_entry(journal, broker, clock):
+    """Live finding 2026-11-15: two-decimal price rounding turned a
+    DOGE stop of 0.05726 into 0.06 — above the 0.05903 entry — so
+    sizing skipped every DOGE signal."""
+    sizing = size_position_at_limit(100_000.0, 0.05903, 0.05726,
+                                    "DOGE/USD", CONFIG)
+    assert sizing["skip_reason"] is None, sizing
+    assert sizing["stop_limit_price"] < 0.05726 < 0.05903
+    assert sizing["stop_limit_price"] == pytest.approx(0.05726 * 0.995,
+                                                       rel=1e-3)
+
+    broker.prices["DOGEUSD"] = 0.05903
+    result = _entry(broker, journal, clock, symbol="DOGE/USD",
+                    planned_entry=0.05903, structural_stop=0.05726,
+                    equity=100_000.0)
+    assert result["status"] == "protected", result
+    stop = broker.open_sells("DOGEUSD")[0]
+    assert stop.stop_price == pytest.approx(0.05726, rel=1e-4)
+    assert stop.limit_price < stop.stop_price
+    assert stop.limit_price == pytest.approx(0.05726 * 0.995, rel=1e-3)
+    # TP levels sit at 1.5R / 3R of the real risk, not a rounded one.
+    risk = result["avg_fill_price"] - 0.05726
+    assert result["tp1"] == pytest.approx(result["avg_fill_price"] + 1.5 * risk)
+    assert result["tp2"] == pytest.approx(result["avg_fill_price"] + 3.0 * risk)
 
 
 # ===========================================================================

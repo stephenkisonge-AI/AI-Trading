@@ -137,8 +137,19 @@ class TradeView:
     def realized_exit_qty(self) -> float:
         return sum(float(e.get("qty") or 0) for e in self.exits)
 
+    def entry_fee_qty(self) -> float:
+        """Base-asset quantity the broker withheld as the entry fee.
+        Alpaca charges crypto BUY fees in kind, so the position is
+        smaller than the fill; the entry path journals the difference in
+        the final plan. Zero for trades journaled before this existed."""
+        try:
+            return max(float(self.plan.get("entry_fee_qty") or 0.0), 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def expected_position_qty(self) -> float:
-        return self.entry_filled_qty() - self.realized_exit_qty()
+        return (self.entry_filled_qty() - self.entry_fee_qty()
+                - self.realized_exit_qty())
 
     def is_terminal(self) -> bool:
         return self.state in TERMINAL_TRADE_STATES

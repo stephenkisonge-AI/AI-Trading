@@ -20,12 +20,39 @@ so every failure mode is testable with fakes.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import timezone
 from typing import Callable, Optional
+
+
+# =========================================================================
+# Order-price precision
+# =========================================================================
+
+# Alpaca's crypto price_increment is 1e-9 for every pair in the universe
+# (checked live 2026-11-15), so the broker never forces coarse rounding.
+MIN_PRICE_DECIMALS = 2
+MAX_PRICE_DECIMALS = 9
+PRICE_SIG_FIGS = 5
+
+
+def price_decimals_for(price: float) -> int:
+    """Decimal places to round an order price near `price` to.
+
+    Keeps at least PRICE_SIG_FIGS significant figures, never fewer than
+    two decimals. A flat two decimals (the pre-2026-11-15 behavior) is
+    fine for BTC/ETH but destroys sub-dollar prices: DOGE at $0.059 with
+    a 3% stop rounded the stop to $0.06 — ABOVE the entry — and XTZ at
+    $0.216 moved the stop and both TPs by more than 1%.
+    """
+    if not price or price <= 0 or not math.isfinite(price):
+        return MIN_PRICE_DECIMALS
+    decimals = PRICE_SIG_FIGS - 1 - math.floor(math.log10(price))
+    return max(MIN_PRICE_DECIMALS, min(MAX_PRICE_DECIMALS, decimals))
 
 
 # =========================================================================
