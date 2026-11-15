@@ -71,7 +71,10 @@ state calendars.
    (`winget install Git.Git GitHub.cli Python.Python.3.11` if not).
    Then have me authenticate GitHub by telling me to type:
    `! gh auth login` (choose GitHub.com → HTTPS → login via browser with
-   stephenkisongeai@gmail.com). Verify with `gh auth status`.
+   my `stephenkisonge-AI` GitHub account). Verify with `gh auth status`.
+   Then keep my personal email out of this public repo's commits:
+   `git config --local user.email
+   "278677510+stephenkisonge-AI@users.noreply.github.com"`.
 
 2. **Verify the workspace root is the repo root** (already arranged
    2026-07-09). The layout must be: `C:\Users\StephenAI\AI Trading` IS the
