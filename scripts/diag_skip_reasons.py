@@ -42,7 +42,11 @@ def fetch_log(run_id: int) -> str | None:
     try:
         return subprocess.check_output(
             ["gh", "run", "view", str(run_id), "--log"],
-            text=True, stderr=subprocess.DEVNULL,
+            # gh emits UTF-8 (the logs carry emoji). Without an explicit
+            # encoding Windows decodes as cp1252 and the reader thread
+            # dies, silently yielding zero parsed scans.
+            text=True, encoding="utf-8", errors="replace",
+            stderr=subprocess.DEVNULL,
             timeout=60,
         )
     except Exception as exc:
@@ -63,8 +67,11 @@ def parse_skipped(log: str) -> dict | None:
 
 def main(dates: list[str]) -> int:
     runs = []
-    for d in dates:
-        rs = list_runs(d)
+    seen_run_ids: set[int] = set()
+    # A repeated date (or overlapping results) must not count a run twice.
+    for d in dict.fromkeys(dates):
+        rs = [r for r in list_runs(d) if r["databaseId"] not in seen_run_ids]
+        seen_run_ids.update(r["databaseId"] for r in rs)
         runs.extend(rs)
         print(f"[diag] {d}: {len(rs)} successful repository_dispatch runs")
 
