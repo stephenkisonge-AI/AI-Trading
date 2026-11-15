@@ -31,7 +31,7 @@ entries, and emit a CRITICAL alert.
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
@@ -60,6 +60,8 @@ from src.execution import (
 )
 from src.journal import TradeView
 from src.trader import (
+    _EXPECTANCY_MIN_R,
+    _LIFECYCLE_LOOKBACK_DAYS,
     _MAX_NOTIONAL_USD,
     _MIN_NOTIONAL_USD,
     _QTY_DECIMALS,
@@ -494,6 +496,70 @@ def _realized_r(view: TradeView) -> Optional[float]:
     pl = sum(float(e.get("qty") or 0) * (float(e.get("price") or 0) - fill_price)
              for e in view.exits if e.get("price"))
     return pl / (filled_qty * risk_per_unit)
+
+
+def journal_lifecycle_stats(journal, days_back: int = _LIFECYCLE_LOOKBACK_DAYS,
+                            now_fn=lambda: datetime.now(timezone.utc)) -> dict:
+    """Lifecycle stats for the scan summary, taken from the JOURNAL —
+    the strand's own record of the trades it opened.
+
+    Replaces trader.summarize_lifecycle for the journaled execution
+    path. That legacy version rebuilds trades from Alpaca order history,
+    so it counts every crypto order on the shared paper account,
+    including manual and smoke-test orders the strand never made (the
+    2026-11-15 smoke test showed up as "3 closed, 0W / 3L"). Same schema,
+    so notifier.format_lifecycle_lines needs no change.
+
+    P&L is exit proceeds minus what the entry fill cost, so the in-kind
+    entry fee counts as a loss; R is the journal's realized R.
+    """
+    cutoff = now_fn() - timedelta(days=days_back)
+    stats: dict = {
+        "enabled": True, "days_back": days_back, "total_closed": 0,
+        "open_trades": 0, "wins": 0, "losses": 0, "total_pl_usd": 0.0,
+        "win_rate": None, "mean_r": None, "best_r": None, "worst_r": None,
+        "expectancy_warning": None,
+    }
+    r_multiples: list[float] = []
+    for view in journal.trades().values():
+        fill_price = view.plan.get("actual_fill_price")
+        fill_qty = view.plan.get("actual_fill_qty")
+        if not fill_price or not fill_qty:
+            continue  # never filled: planned, aborted or rejected
+        if not view.is_terminal():
+            stats["open_trades"] += 1
+            continue
+        try:
+            closed_at = _parse_ts(view.updated_at)
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError, AttributeError):
+            closed_at = None
+        if closed_at is not None and closed_at < cutoff:
+            continue
+        proceeds = sum(float(e.get("qty") or 0) * float(e.get("price") or 0)
+                       for e in view.exits)
+        pl = proceeds - float(fill_qty) * float(fill_price)
+        stats["total_closed"] += 1
+        stats["total_pl_usd"] += pl
+        stats["wins" if pl > 0 else "losses"] += 1
+        realized = (view.realized_r if view.realized_r is not None
+                    else _realized_r(view))
+        if realized is not None:
+            r_multiples.append(float(realized))
+
+    if stats["total_closed"]:
+        stats["win_rate"] = stats["wins"] / stats["total_closed"]
+    if r_multiples:
+        stats["mean_r"] = sum(r_multiples) / len(r_multiples)
+        stats["best_r"] = max(r_multiples)
+        stats["worst_r"] = min(r_multiples)
+        if stats["total_closed"] >= 30 and stats["mean_r"] < _EXPECTANCY_MIN_R:
+            stats["expectancy_warning"] = (
+                f"mean R {stats['mean_r']:+.2f} below +{_EXPECTANCY_MIN_R}R "
+                f"after {stats['total_closed']} trades — strategy doc says "
+                f"STOP the experiment")
+    return stats
 
 
 def _close_trade_from_stop_fill(client, journal, view: TradeView,

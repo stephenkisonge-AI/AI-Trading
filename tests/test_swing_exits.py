@@ -17,6 +17,7 @@ from src.reconciliation import reconcile
 from src.swing_exits import (
     check_sell_invariant,
     fresh_bid,
+    journal_lifecycle_stats,
     manage_swing_trades,
     open_protected_trade,
     size_position_at_limit,
@@ -454,6 +455,42 @@ def test_fee_adjusted_trade_closes_flat_through_regime_exit(
     assert SYM_NS not in broker.positions
     assert journal.trades()[result["trade_id"]].is_terminal()
     assert _reconcile(broker, journal).ok
+
+
+def test_journal_lifecycle_counts_only_the_strands_own_trades(
+        journal, broker, clock):
+    """Scan-summary stats come from the journal, so crypto orders that
+    exist only at the broker (manual or smoke-test trades) never show up
+    as the strand's results."""
+    # A broker-only round trip the journal knows nothing about.
+    broker.prices["BTCUSD"] = 65000.0
+    stray = broker.new_order("BTCUSD", "buy", 0.01, "market", "manual-1")
+    broker.fill(stray)
+    broker.fill(broker.new_order("BTCUSD", "sell", 0.01, "market", "manual-2"))
+
+    empty = journal_lifecycle_stats(journal)
+    assert empty["enabled"] is True
+    assert empty["total_closed"] == 0 and empty["open_trades"] == 0
+
+    broker.buy_fee_fraction = 0.0025
+    result = _entry(broker, journal, clock)
+    assert journal_lifecycle_stats(journal)["open_trades"] == 1
+
+    broker.prices[SYM_NS] = 110.0  # exit above the 100.05 fill
+    _manage(broker, journal, clock, bid=100.0, regime="BEARISH")
+    stats = journal_lifecycle_stats(journal)
+    assert stats["open_trades"] == 0 and stats["total_closed"] == 1
+    assert stats["wins"] == 1 and stats["losses"] == 0
+    gross, fill = result["filled_qty"], result["avg_fill_price"]
+    # Proceeds on the net (post-fee) quantity minus the gross cost.
+    assert stats["total_pl_usd"] == pytest.approx(
+        gross * 0.9975 * 110.0 - gross * fill)
+    assert stats["mean_r"] is not None and stats["mean_r"] > 0
+
+    # Outside the lookback window the closed trade drops out.
+    later = datetime.now(timezone.utc) + timedelta(days=120)
+    assert journal_lifecycle_stats(journal, now_fn=lambda: later)[
+        "total_closed"] == 0
 
 
 def test_sub_dollar_coin_keeps_stop_below_entry(journal, broker, clock):

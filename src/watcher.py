@@ -31,7 +31,11 @@ from src.strategy import classify_regime, evaluate_setup_a, evaluate_setup_b
 from src.trader import auto_execute_enabled, summarize_lifecycle
 from src.entry_gates import evaluate_entry_gates
 from src.execution import load_exec_config
-from src.swing_exits import manage_swing_trades, open_protected_trade
+from src.swing_exits import (
+    journal_lifecycle_stats,
+    manage_swing_trades,
+    open_protected_trade,
+)
 from src.swing_runtime import (
     build_synced_journal,
     quote_for,
@@ -357,7 +361,12 @@ def main() -> int:
     lifecycle_stats: dict = {}
     if auto_exec:
         try:
-            lifecycle_stats = summarize_lifecycle()
+            # The journal is the strand's own trade record; the legacy
+            # order-history reconstruction is only a fallback, since it
+            # also counts crypto orders the strand never placed.
+            lifecycle_stats = (journal_lifecycle_stats(journal)
+                               if journal is not None
+                               else summarize_lifecycle())
             print(f"[watcher] lifecycle: {lifecycle_stats}")
         except Exception as exc:
             print(f"[watcher] lifecycle summary failed: {exc}", file=sys.stderr)
