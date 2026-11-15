@@ -33,23 +33,33 @@ from me when a step needs my interactive input.
 Two automated trading strands sharing ONE Alpaca **paper** account
 ($100K-ish equity, never live):
 
-1. **Crypto swing** (`src/watcher.py` + `src/trader.py`) — BTC/ETH/SOL/LINK/AVAX,
-   4H/daily regime, runs on GitHub Actions cron every 4h (`watcher.yml`),
-   long-only, manual-confirm ethos with auto-execute behind `WATCHER_AUTO_EXECUTE`.
+1. **Crypto swing** (`src/watcher.py` entry scan, `src/swing_manager.py`
+   position management, `src/swing_exits.py` + `src/execution.py` orders) —
+   BTC/ETH/SOL/LINK/AVAX/DOGE/UNI/XTZ (`src/universe.py`), 4H/daily regime,
+   long-only, Setup B (breakout-retest) only — Setup A is retired from live
+   scanning. `watcher.yml` scans every 4h at :17 UTC; `swing-manager.yml`
+   manages open positions every ~20 min. Auto-executes on paper behind
+   `WATCHER_AUTO_EXECUTE` (enabled 2026-11-15 after a live paper smoke test;
+   it was `false` from 2026-07-10 until then). Trade journal + scan telemetry
+   live in the PRIVATE repo `stephenkisonge-AI/AI-Trading-State`.
 2. **Equity day-trade** (`src/day_watcher.py` + `src/day_trader.py`) — 21 mega-cap
    universe, 5-min ORB + VWAP-reclaim setups (long + short mirrors), auto-executes
    on paper behind `WATCHER_DAY_AUTO_EXECUTE`, runs every 5 min during US market
    hours via `day-watcher.yml`.
 
 Alerts go to Telegram. A healthchecks.io dead-man's switch watches the day
-watcher. GitHub repo: `stephenkisonge-AI/AI-Trading` (this is the source of
-truth for all code + state calendars).
+watcher and the swing manager, and `doctor.yml` (every 6h) checks that the
+external-cron triggers are alive and classifies failed runs. GitHub repo:
+`stephenkisonge-AI/AI-Trading` — PUBLIC (free Actions minutes), so nothing
+secret may ever be committed to it; it is the source of truth for all code +
+state calendars.
 
 ## Where everything lives
 
 | Data | Location | Restored on this machine? |
 |---|---|---|
 | Code, workflows, strategy docs, state calendars | GitHub repo | yes — workspace root is the repo checkout (incl. `.git`), may be stale vs GitHub |
+| Crypto trade journal + scan telemetry (`swing/`) | private GitHub repo `AI-Trading-State` | no — lives on GitHub; clone it OUTSIDE this working tree when you need to read it |
 | Local secrets (`.env`: Alpaca keys, paper flag, Telegram token+chat) | local only | **yes — `.env` at workspace root; the zip is the only other copy** |
 | GitHub Actions secrets (see list below) | GitHub repo settings | no — survive with the repo |
 | Claude Code memory + session transcripts | `~\.claude\projects\C--Users-StephenAI-AI-Trading\` | yes — installed 2026-07-09 |
@@ -103,27 +113,50 @@ truth for all code + state calendars).
    the extracted folder: it must never sit inside the git working tree,
    because the transcripts must never be committed.
 
-7. **Verify GitHub Actions infrastructure.** Run `gh secret list` — these 9
-   must exist (values for the first 5 are in the restored `.env`; the last 4
-   are flags/URLs listed below):
+7. **Verify GitHub Actions infrastructure.** Run `gh secret list` — these 11
+   must exist (values for the first 5 are in the restored `.env`; the rest
+   are flags/URLs/tokens listed below):
    - `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`, `ALPACA_PAPER_TRADE` (= `True`),
      `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
    - `WATCHER_AUTO_EXECUTE` (= `true`), `WATCHER_DAY_AUTO_EXECUTE` (= `true`),
      `WATCHER_DAY_ENABLE_SHORTS` (= `true`), `HEALTHCHECK_PING_URL`
      (from my healthchecks.io account — if lost, create a new check there and
      set its ping URL; it no-ops gracefully while unset)
+   - `STATE_REPO_TOKEN` — fine-grained PAT scoped to `AI-Trading-State`
+     (contents: read/write). Without it the crypto strand has no journal and
+     fails closed to alerts-only. `FINNHUB_API_KEY` — free-tier key used by
+     the weekly earnings-calendar refresh.
    If any are missing (e.g. repo was re-created): `gh secret set NAME`.
-   Then confirm workflows are enabled: `gh workflow list`.
+   Secret VALUES cannot be read back, so the list above is the intended
+   state, not proof. Prove the real state from a run log: `gh run view
+   <id> --log` on a Watcher run prints `[watcher] auto-execute enabled:`
+   (GitHub masks the word `True` as `***`; `False` prints in clear) and a
+   Day Watcher run prints the equivalent line.
+   Then confirm all 5 workflows are active: `gh workflow list` (Watcher,
+   Swing Manager, Day Watcher, Doctor, Refresh day-trade calendars).
 
 8. **Re-arm the external cron** (only if the repo was re-created or the
    cron-job.org account was lost — otherwise it's still running): GitHub's
-   free-tier scheduler drops most `*/5` ticks, so the day watcher's PRIMARY
-   trigger is cron-job.org POSTing every 5 minutes, Mon–Fri during US market
-   hours (~13:00–21:00 UTC), to:
+   free-tier scheduler delays and drops ticks, so every trading workflow's
+   PRIMARY trigger is a cron-job.org job POSTing to
    `https://api.github.com/repos/stephenkisonge-AI/AI-Trading/dispatches`
    with headers `Authorization: Bearer <GitHub PAT with repo scope>`,
-   `Accept: application/vnd.github+json` and body
-   `{"event_type": "day-watcher-tick"}`. Create a fresh PAT for it.
+   `Accept: application/vnd.github+json`. Three jobs, one per body (set each
+   job's time zone to UTC):
+
+   | Body | Schedule | Workflow |
+   |---|---|---|
+   | `{"event_type": "day-watcher-tick"}` | every 5 min, Mon–Fri, ~13:00–21:00 UTC | `day-watcher.yml` |
+   | `{"event_type": "swing-manage-tick"}` | every 20 min, every day | `swing-manager.yml` |
+   | `{"event_type": "crypto-watcher-tick"}` | minute 17 of hours 0, 4, 8, 12, 16, 20, every day | `watcher.yml` |
+
+   All three share one no-expiration classic PAT (note
+   `cron-job-org-dispatch`, repo scope); each job stores its own copy, so a
+   rotated token must be updated in all three. A successful test run returns
+   HTTP 204. Each workflow keeps its native schedule as a backup, so a dead
+   job does not turn runs red — it only degrades cadence. The Doctor alerts
+   on a silent dispatch trigger, and crypto scans done by the backup are
+   labelled `(FALLBACK)` in Telegram.
 
 9. **End-to-end smoke test.** Trigger the Telegram pipeline:
    `gh workflow run day-watcher.yml -f test_ping=true`, then check
@@ -131,11 +164,13 @@ truth for all code + state calendars).
    🧪 ping arrived in my Telegram. Also run `gh run list` generally to confirm
    scheduled runs are firing.
 
-10. **Local MCP crypto strand (optional, manual-confirm workflow).** The local
-    Alpaca MCP server setup is described in `Alpaca MCP Sever and Trading prompt.md`
+10. **Local MCP server (optional — for inspecting the account from a Claude
+    session; the trading strands do not depend on it).** The local Alpaca MCP
+    server setup is described in `Alpaca MCP Sever and Trading prompt.md`
     and `scripts/start-alpaca-mcp.ps1`. Important known trap (from memory):
     NEVER register it via `powershell -File <path with spaces>` — it breaks
-    silently; use the direct executable or `-Command "& '<path>'"`.
+    silently; use the direct executable or `-Command "& '<path>'"`. If it
+    times out at session start, `/mcp` reconnects it.
 
 ## Project rules to carry forward (also in restored memory)
 
@@ -156,3 +191,6 @@ truth for all code + state calendars).
   `phase=` stdout before assuming infrastructure failure.
 - Both strands share one paper account — every order/position/lifecycle read
   must be scoped to that strand's own symbol universe.
+- Alpaca takes its crypto BUY fee out of the purchased quantity (position =
+  fill − 0.25%). The journal records that as `entry_fee_qty`; never assume
+  position quantity equals filled quantity.
