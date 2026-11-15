@@ -498,6 +498,16 @@ def run_intraday_scan(now_et: datetime) -> dict:
                     f"🚪 SPY-VWAP HARD EXIT — {symbol} closed at market. "
                     f"({reason}). Cancelled {len(act.get('cancelled_orders', []))} resting orders."
                 )
+            elif action == "unprotected_flatten":
+                if act.get("position_gone"):
+                    how = "it closed on its own before the flatten was needed"
+                else:
+                    how = "closed at market"
+                send_alert(
+                    f"🛑 UNPROTECTED POSITION — {symbol} had no resting "
+                    f"stop; {how}. Cancelled "
+                    f"{len(act.get('cancelled_orders', []))} resting orders."
+                )
             elif action == "time_stop":
                 send_alert(
                     f"⏱ TIME STOP — {symbol} closed at market. "

@@ -752,6 +752,224 @@ def test_management_no_entry_fill_bails_safely():
     assert res is None
 
 
+# --- Unprotected-position guard + in-run close retry -----------------------
+# Regression cover for MU 2026-07-15: the time stop cancelled the exits,
+# the close did not go through, and nothing retried it — the time stop
+# derives R from the resting stop it had just cancelled. The position sat
+# with no stop for 20 minutes.
+
+
+@pytest.fixture
+def _no_mgmt_waits(monkeypatch):
+    monkeypatch.setattr(day_trader, "_UNPROTECTED_RECHECK_SEC", 0)
+    monkeypatch.setattr(day_trader, "_CLOSE_RETRY_WAIT_SEC", 0)
+    monkeypatch.setattr(day_trader, "_CANCEL_RELEASE_TIMEOUT_SEC", 0)
+
+
+class _FlakyCloseClient(MgmtFakeClient):
+    """close_position rejects the first `fail_times` calls."""
+
+    def __init__(self, fail_times, **kwargs):
+        super().__init__(**kwargs)
+        self.fail_times = fail_times
+        self.close_calls = 0
+
+    def close_position(self, symbol):
+        self.close_calls += 1
+        if self.close_calls <= self.fail_times:
+            raise RuntimeError("insufficient qty available for order")
+        return super().close_position(symbol)
+
+
+def test_unprotected_position_is_flattened(_no_mgmt_waits):
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[_filled_buy_order()], positions=[pos])
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 30)),
+        spy_5min_with_indicators=None,
+    )
+    assert res["action"] == "unprotected_flatten"
+    assert res["error"] is None
+    assert res["close_order_id"] is not None
+    assert client.closed_positions == ["NVDA"]
+
+
+def test_unprotected_position_is_flattened_without_an_entry_fill(_no_mgmt_waits):
+    # Carried past the close: yesterday's DAY orders expired and the entry
+    # is outside the order-history lookback. Previously this bailed with
+    # no action on every pass until 3:55 PM.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[], positions=[pos])
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(9, 45)),
+        spy_5min_with_indicators=None,
+    )
+    assert res["action"] == "unprotected_flatten"
+    assert client.closed_positions == ["NVDA"]
+
+
+def test_unprotected_short_is_flattened_and_protected_short_is_not(_no_mgmt_waits):
+    short = _open_position(qty=-5, avg_entry=100.0, current=99.5)
+    now = _et_dt(date(2026, 5, 28), time(10, 10))
+    entry = _filled_buy_order(side="sell",
+                              filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC))
+
+    naked = MgmtFakeClient(orders=[entry], positions=[short])
+    res = manage_position(client=naked, position=short, now_et=now,
+                          spy_5min_with_indicators=None)
+    assert res["action"] == "unprotected_flatten"
+
+    buy_stop = _open_stop_order(stop_price=101.0)
+    buy_stop.side = "OrderSide.BUY"
+    covered = MgmtFakeClient(orders=[entry, buy_stop], positions=[short])
+    res = manage_position(client=covered, position=short, now_et=now,
+                          spy_5min_with_indicators=None)
+    assert res is None
+    assert covered.closed_positions == []
+
+
+def test_unprotected_guard_does_nothing_when_position_already_closed(_no_mgmt_waits):
+    # The stop (or TP2) filled between the positions snapshot and this
+    # pass: no stop AND no position. Nothing to flatten.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[_filled_buy_order()], positions=[])
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 30)),
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+    assert client.closed_positions == []
+
+
+def test_unprotected_guard_needs_two_reads_to_agree(_no_mgmt_waits):
+    # One lagging/empty order read must not liquidate a healthy trade.
+    pos = _open_position()
+    buy = _filled_buy_order(filled_at=datetime(2026, 5, 28, 14, 20, tzinfo=_UTC))
+
+    class _LaggyClient(MgmtFakeClient):
+        reads = 0
+
+        def get_orders(self, filter=None):
+            self.reads += 1
+            # The first check makes two reads (history, then open orders).
+            return [buy] if self.reads <= 2 else [buy, _open_stop_order()]
+
+    client = _LaggyClient(positions=[pos])
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 30)),
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+    assert client.closed_positions == []
+
+
+def test_stop_mid_replace_counts_as_protection(_no_mgmt_waits):
+    pos = _open_position()
+    stop = _open_stop_order()
+    stop.status = "OrderStatus.PENDING_REPLACE"
+    client = MgmtFakeClient(
+        orders=[_filled_buy_order(
+            filled_at=datetime(2026, 5, 28, 14, 20, tzinfo=_UTC)), stop],
+        positions=[pos],
+    )
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 30)),
+        spy_5min_with_indicators=None,
+    )
+    assert res is None
+    assert client.closed_positions == []
+
+
+def test_unreadable_orders_never_trigger_a_flatten(_no_mgmt_waits):
+    pos = _open_position()
+
+    class _BrokenOrdersClient(MgmtFakeClient):
+        def get_orders(self, filter=None):
+            raise RuntimeError("503 from broker")
+
+    client = _BrokenOrdersClient(positions=[pos])
+    actions = manage_open_positions(
+        now_et=_et_dt(date(2026, 5, 28), time(10, 30)),
+        spy_5min_with_indicators=None, client=client,
+    )
+    assert [a["action"] for a in actions] == ["error"]
+    assert "management crashed" in actions[0]["error"]
+    assert client.closed_positions == []
+
+
+def test_close_is_retried_within_the_run(_no_mgmt_waits):
+    pos = _open_position()
+    client = _FlakyCloseClient(
+        fail_times=1,
+        orders=[_filled_buy_order(), _open_stop_order()], positions=[pos],
+    )
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(15, 56)),
+        spy_5min_with_indicators=None,
+    )
+    assert res["action"] == "hard_close_355pm"
+    assert res["error"] is None
+    assert res["close_attempts"] == 2
+    assert client.closed_positions == ["NVDA"]
+
+
+def test_close_that_errored_but_left_no_position_is_not_an_error(_no_mgmt_waits):
+    pos = _open_position()
+    client = _FlakyCloseClient(
+        fail_times=99,
+        orders=[_filled_buy_order(), _open_stop_order()], positions=[],
+    )
+    res = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(15, 56)),
+        spy_5min_with_indicators=None,
+    )
+    assert res["error"] is None
+    assert res["position_gone"] is True
+    assert res["close_attempts"] == 1
+
+
+def test_failed_close_is_flattened_on_the_next_pass(_no_mgmt_waits):
+    # The MU 2026-07-15 sequence, end to end.
+    pos = _open_position(qty=5, avg_entry=100.0, current=100.10)
+    client = _FlakyCloseClient(
+        fail_times=day_trader._CLOSE_MAX_ATTEMPTS,
+        orders=[
+            _filled_buy_order(qty=5, filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+            _open_stop_order(stop_price=99.0),
+        ],
+        positions=[pos],
+    )
+    # Pass 1 (14:35 UTC): time stop fires, exits are cancelled, every
+    # close attempt is rejected.
+    first = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 35)),
+        spy_5min_with_indicators=None,
+    )
+    assert first["action"] == "time_stop"
+    assert first["close_attempts"] == day_trader._CLOSE_MAX_ATTEMPTS
+    assert "NO STOP" in first["error"]
+    assert client.cancelled == ["stop-NVDA"]
+    assert client.closed_positions == []
+    # Pass 2 (14:40 UTC): the stop is gone, so the time stop can no longer
+    # compute R. The guard closes the position instead of leaving it naked.
+    second = manage_position(
+        client=client, position=pos,
+        now_et=_et_dt(date(2026, 5, 28), time(10, 40)),
+        spy_5min_with_indicators=None,
+    )
+    assert second["action"] == "unprotected_flatten"
+    assert second["error"] is None
+    assert client.closed_positions == ["NVDA"]
+
+
 def test_manage_open_positions_never_touches_crypto_positions():
     # The crypto swing strand shares this paper account. Its positions must
     # be invisible to day-trade management — the 3:55 PM hard close would
