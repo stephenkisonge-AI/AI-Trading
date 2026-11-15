@@ -34,6 +34,29 @@ def test_econ_calendar_entries_are_well_formed():
         assert ts.tzinfo is not None, f"timezone missing: {entry}"
 
 
+def test_econ_calendar_offsets_match_new_york_dst():
+    """Each entry's hand-typed UTC offset must be the real New York
+    offset on that date. A wrong offset moves the blackout window by an
+    hour (the 2027-03-10 CPI entry carried -04:00 four days before DST
+    began)."""
+    from zoneinfo import ZoneInfo
+    new_york = ZoneInfo("America/New_York")
+    for entry in ECON_CALENDAR:
+        ts = datetime.fromisoformat(entry["datetime_et"])
+        expected = ts.replace(tzinfo=None).replace(tzinfo=new_york).utcoffset()
+        assert ts.utcoffset() == expected, f"wrong UTC offset: {entry}"
+
+
+def test_econ_calendar_has_no_duplicates_and_weekday_releases_only():
+    seen = set()
+    for entry in ECON_CALENDAR:
+        key = (entry["name"], entry["datetime_et"])
+        assert key not in seen, f"duplicate entry: {entry}"
+        seen.add(key)
+        ts = datetime.fromisoformat(entry["datetime_et"])
+        assert ts.weekday() < 5, f"release on a weekend: {entry}"
+
+
 def test_econ_calendar_covers_at_least_12_months():
     """Calendar must extend at least 12 months from today, else the
     annual refresh is overdue."""
