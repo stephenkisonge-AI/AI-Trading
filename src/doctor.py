@@ -390,9 +390,11 @@ def check_stuck_runs(runs: list[dict], now: datetime) -> list[Finding]:
         f"({_count_by_workflow([r for _, r in stuck])}; oldest "
         f"{oldest}). Those ticks did no work.",
         "GitHub-side fault; nothing to change in the repo, and later "
-        "ticks normally run fine. Cancel the stuck runs so they cannot "
-        f"start late: gh run cancel <run-id> for each of: {ids}. Check "
-        "https://www.githubstatus.com if new ones keep appearing.",
+        "ticks normally run fine. You can try gh run cancel <run-id> "
+        f"for each of: {ids} — but GitHub usually refuses both cancel "
+        "and force-cancel for these (11 of 11 on 2026-11-16), and none "
+        "has ever been seen to start late, so leaving them is fine. "
+        "Check https://www.githubstatus.com if new ones keep appearing.",
     )]
 
 
