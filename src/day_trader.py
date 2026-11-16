@@ -133,6 +133,20 @@ _OPEN_ORDER_STATUSES = (
     "new", "accepted", "pending_new", "accepted_for_bidding",
     "held", "partially_filled",
 )
+# A market close is retried inside the same run. Once the resting exits
+# are cancelled the position has no stop, so one rejected close must not
+# leave it naked until the next 5-minute tick. (MU, 2026-07-15: the time
+# stop cancelled the exits, the close did not go through, and the
+# position sat unprotected for 20 minutes — it lost 1.5R instead of the
+# ~0.4R a clean exit would have cost.)
+_CLOSE_MAX_ATTEMPTS = 3
+_CLOSE_RETRY_WAIT_SEC = 2
+# Unprotected-position guard: a position is flattened only when two reads
+# this far apart BOTH show no protective stop, so a single lagging or
+# empty order read cannot liquidate a healthy trade.
+_UNPROTECTED_RECHECK_SEC = 2
+# A stop being repriced (TP1 -> breakeven move) is still protection.
+_PROTECTIVE_STOP_STATUSES = _OPEN_ORDER_STATUSES + ("pending_replace",)
 
 # --- D5c lifecycle tunables ----------------------------------------------
 # Per Day_Trading_Strategy.md §"Phase D5c". 90 days mirrors crypto.
@@ -1047,6 +1061,13 @@ def _close_position_market(client, symbol: str, position, reason: str,
     remain (cancellation is async — `held_for_orders` releases with a
     small lag), then close.
 
+    The sweep + close is attempted up to `_CLOSE_MAX_ATTEMPTS` times in
+    this run: after the first sweep the position has no stop, so a
+    rejected close is retried immediately rather than left for the next
+    tick. If every attempt fails the error says so, and the next
+    management pass flattens the position via the unprotected-position
+    guard in `manage_position`.
+
     Never raises — failures are captured in the returned dict.
     """
     qty = float(getattr(position, "qty", 0))
@@ -1054,29 +1075,86 @@ def _close_position_market(client, symbol: str, position, reason: str,
         "reason": reason,
         "cancelled_orders": [],
         "close_order_id": None, "qty": qty, "error": None,
+        "close_attempts": 0,
     }
-    try:
-        for o in _open_orders_for(client, symbol):
-            try:
-                client.cancel_order_by_id(o.id)
-                out["cancelled_orders"].append(str(o.id))
-            except Exception as exc:
-                print(f"[day_trader] cancel {getattr(o, 'id', '?')} failed: {exc}",
-                      file=sys.stderr)
-        deadline = time.monotonic() + _CANCEL_RELEASE_TIMEOUT_SEC
-        while _open_orders_for(client, symbol) and time.monotonic() < deadline:
-            time.sleep(_CANCEL_RELEASE_POLL_SEC)
-    except Exception as exc:
-        # Sweep failures shouldn't stop the close attempt — worst case it
-        # fails with the same insufficient-qty error and alerts.
-        print(f"[day_trader] pre-close cancel sweep failed for {symbol}: {exc}",
-              file=sys.stderr)
-    try:
-        order = client.close_position(symbol)
-        out["close_order_id"] = str(getattr(order, "id", "") or "")
-    except Exception as exc:
-        out["error"] = f"close_position failed: {exc}"
+    last_error = None
+    for attempt in range(1, _CLOSE_MAX_ATTEMPTS + 1):
+        out["close_attempts"] = attempt
+        try:
+            for o in _open_orders_for(client, symbol):
+                try:
+                    client.cancel_order_by_id(o.id)
+                    out["cancelled_orders"].append(str(o.id))
+                except Exception as exc:
+                    print(f"[day_trader] cancel {getattr(o, 'id', '?')} failed: {exc}",
+                          file=sys.stderr)
+            deadline = time.monotonic() + _CANCEL_RELEASE_TIMEOUT_SEC
+            while _open_orders_for(client, symbol) and time.monotonic() < deadline:
+                time.sleep(_CANCEL_RELEASE_POLL_SEC)
+        except Exception as exc:
+            # Sweep failures shouldn't stop the close attempt — worst case
+            # it fails with the same insufficient-qty error and retries.
+            print(f"[day_trader] pre-close cancel sweep failed for {symbol}: {exc}",
+                  file=sys.stderr)
+        try:
+            order = client.close_position(symbol)
+            out["close_order_id"] = str(getattr(order, "id", "") or "")
+            return out
+        except Exception as exc:
+            last_error = exc
+            print(f"[day_trader] close_position {symbol} attempt {attempt}/"
+                  f"{_CLOSE_MAX_ATTEMPTS} failed: {exc}", file=sys.stderr)
+        # A close that errored may still have gone through (timeout on the
+        # response), or a stop/TP may have filled meanwhile. Nothing left
+        # to close is success, not an error.
+        if _position_still_open(client, symbol) is False:
+            out["position_gone"] = True
+            return out
+        if attempt < _CLOSE_MAX_ATTEMPTS:
+            time.sleep(_CLOSE_RETRY_WAIT_SEC)
+    out["error"] = (f"close_position failed after {_CLOSE_MAX_ATTEMPTS} "
+                    f"attempts: {last_error}")
+    if out["cancelled_orders"]:
+        out["error"] += (" — exits were cancelled, so the position has NO "
+                         "STOP; the next management pass will flatten it")
     return out
+
+
+def _position_still_open(client, symbol: str):
+    """True / False when the broker could be consulted, None when not.
+    Callers treat None as "assume it is still open"."""
+    try:
+        return any(getattr(p, "symbol", None) == symbol
+                   for p in client.get_all_positions())
+    except Exception as exc:
+        print(f"[day_trader] position re-check failed for {symbol}: {exc}",
+              file=sys.stderr)
+        return None
+
+
+def _has_protective_stop(client, symbol: str, now_utc: datetime,
+                         direction: str = "long") -> bool:
+    """True when a live protective stop rests for `symbol`.
+
+    Deliberately generous: the stop counts if EITHER the order-history
+    read used by the rest of management (`_find_resting_stop`) OR the
+    broker's open-orders list shows an exit-side stop, including one
+    that is mid-replace. Errors propagate — an unreadable order book is
+    never treated as "no stop".
+    """
+    if _find_resting_stop(client, symbol, now_utc, direction=direction) is not None:
+        return True
+    exit_side = "buy" if direction == "short" else "sell"
+    orders = client.get_orders(filter=GetOrdersRequest(
+        status=QueryOrderStatus.OPEN, symbols=[symbol],
+    ))
+    for o in orders:
+        status = str(getattr(o, "status", "")).lower().split(".")[-1]
+        is_exit = str(getattr(o, "side", "")).lower().endswith(exit_side)
+        is_stop = "stop" in str(getattr(o, "order_type", "")).lower()
+        if status in _PROTECTIVE_STOP_STATUSES and is_exit and is_stop:
+            return True
+    return False
 
 
 def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
@@ -1151,7 +1229,8 @@ def manage_position(
     """Apply the day-trade management rules in priority order.
 
     Returns an action dict if something was done, else None.
-    Priority: 3:55 close → SPY-VWAP break → TP1→breakeven → time stop.
+    Priority: 3:55 close → unprotected position → SPY-VWAP break →
+    TP1→breakeven → time stop.
 
     Caller is responsible for iterating over open positions; this
     function handles one position at a time.
@@ -1174,6 +1253,27 @@ def manage_position(
         )
         return {"action": "hard_close_355pm", "symbol": symbol, **res}
 
+    # --- 2. Unprotected position → flatten (fail closed) ---
+    # Every day-trade position rests behind an OCO stop from the moment
+    # its entry bundle completes. One without a stop is the residue of a
+    # failed close (exits cancelled, close rejected), a broken bracket,
+    # or a position carried past the close after its DAY orders expired.
+    # None of the rules below can manage it — the time stop derives R
+    # from the resting stop — so it is closed here, before anything else.
+    # Two reads, with the position re-confirmed in between: a stop or TP
+    # that has just filled leaves no stop AND no position, which is fine.
+    if not _has_protective_stop(client, symbol, now_utc, direction=direction):
+        time.sleep(_UNPROTECTED_RECHECK_SEC)
+        if _position_still_open(client, symbol) is False:
+            return None
+        if not _has_protective_stop(client, symbol, now_utc, direction=direction):
+            res = _close_position_market(
+                client, symbol, position,
+                reason="no resting protective stop — position was unprotected",
+                now_utc=now_utc,
+            )
+            return {"action": "unprotected_flatten", "symbol": symbol, **res}
+
     # Reconstruct entry fill — needed for SPY-VWAP-after-entry check
     # AND for time stop.
     entry_fill = _find_entry_fill(client, symbol, now_utc, direction=direction)
@@ -1185,7 +1285,7 @@ def manage_position(
         if entry_fill.filled_at.tzinfo else entry_fill.filled_at.replace(tzinfo=timezone.utc)
     avg_entry = float(getattr(position, "avg_entry_price", 0) or 0)
 
-    # --- 2. SPY VWAP break against our direction after entry ---
+    # --- 3. SPY VWAP break against our direction after entry ---
     if _spy_broke_vwap_after(spy_5min_with_indicators, fill_time_utc,
                              direction=direction):
         side_word = "above" if is_short else "below"
@@ -1196,7 +1296,7 @@ def manage_position(
         )
         return {"action": "hard_exit_spy_vwap_break", "symbol": symbol, **res}
 
-    # --- 3. TP1 fill → move stop to breakeven ---
+    # --- 4. TP1 fill → move stop to breakeven ---
     tp1_filled = _detect_tp1_filled(client, symbol, fill_time_utc,
                                     direction=direction)
     resting_stop = _find_resting_stop(client, symbol, now_utc,
@@ -1214,7 +1314,7 @@ def manage_position(
             )
             return {"action": "breakeven_move", "symbol": symbol, **rep}
 
-    # --- 4. Time stop: 30 min after fill without ≥ 0.25R of progress ---
+    # --- 5. Time stop: 30 min after fill without ≥ 0.25R of progress ---
     minutes_since_fill = (now_utc - fill_time_utc).total_seconds() / 60.0
     if minutes_since_fill >= _TIME_STOP_MINUTES and not tp1_filled:
         # Recover R from the resting stop if we still have it.

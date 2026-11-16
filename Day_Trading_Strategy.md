@@ -541,6 +541,12 @@ free up the position slot before new entries are considered.
 For the (at most) one open position, in priority order:
 - **3:55 PM exit:** if current time ≥ 15:55 ET → market sell all,
   cancel resting orders.
+- **Unprotected position:** if the position has no resting protective
+  stop (two order reads, the position re-confirmed in between) →
+  market sell all. A day-trade position without a stop is the residue
+  of a failed close, a broken bracket, or a carry past the close; no
+  rule below can manage it, because the time stop derives R from the
+  resting stop. An order read that errors is never treated as "no stop".
 - **Hard exit — SPY breaks VWAP:** if SPY 5-min close below session
   VWAP after our position opened → market sell all.
 - **Hard exit — circuit breaker halt** on the position ticker →
@@ -551,8 +557,16 @@ For the (at most) one open position, in priority order:
   entry + 0.25R → market sell all, cancel resting orders.
 - Otherwise: no action.
 
+Every market close cancels the resting orders first, and the cancel +
+close is retried up to 3 times within the same scan. If all attempts
+fail, the alert says the position has no stop, and the next scan's
+unprotected-position rule flattens it. (MU, 2026-07-15: the time stop
+cancelled the exits, the close did not go through, and the position sat
+without a stop for 20 minutes — a 1.5R loss instead of about 0.4R.)
+
 All Telegram alerts: every management action gets its own alert
-(STOP → BREAKEVEN, TIME STOP, REGIME EXIT, 3:55 CLOSE, HALT EXIT).
+(STOP → BREAKEVEN, TIME STOP, REGIME EXIT, 3:55 CLOSE, HALT EXIT,
+UNPROTECTED POSITION).
 
 **Phase D5c — lifecycle stats:**
 
