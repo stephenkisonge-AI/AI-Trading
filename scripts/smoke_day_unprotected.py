@@ -27,7 +27,7 @@ import argparse
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,11 +137,25 @@ def main(argv=None) -> int:
         print(f"  opened {qty} {symbol} @ {px:.2f}, stops {stop_px}, targets {tp_px}")
         return client.get_open_position(symbol)
 
+    def resting_legs():
+        """Every resting order for the symbol, stop legs included.
+
+        Alpaca's open-orders query (what open_orders() uses) returns
+        only the limit leg of an OCO pair; the stop leg sits "held" and
+        shows up only in the all-status listing — which is where
+        _find_resting_stop looks. Live-verified 2026-11-16: two OCO
+        brackets = 2 open orders but 4 resting legs.
+        """
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+        return [o for o in dt._list_orders_since(client, symbol, since)
+                if str(o.status).lower().split(".")[-1]
+                in dt._PROTECTIVE_STOP_STATUSES]
+
     def statuses():
         return sorted(f"{str(o.side).split('.')[-1].lower()} "
                       f"{str(o.order_type).split('.')[-1].lower()} "
                       f"{str(o.status).split('.')[-1].lower()}"
-                      for o in open_orders())
+                      for o in resting_legs())
 
     try:
         if dt._position_still_open(client, symbol) is not False or open_orders():
@@ -160,7 +174,7 @@ def main(argv=None) -> int:
         check("manage_position takes no action", res is None, f"returned {res}")
         check("position and all 4 exit legs still resting",
               dt._position_still_open(client, symbol) is True
-              and len(open_orders()) == 4, f"{len(open_orders())} open orders")
+              and len(resting_legs()) == 4, f"resting: {statuses()}")
 
         print("2. A rejected close is retried within the same call")
         res = dt._close_position_market(
