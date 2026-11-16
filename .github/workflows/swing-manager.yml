@@ -25,8 +25,12 @@ permissions:
 
 # One group across ALL workflows that touch the paper account + state
 # repo (watcher.yml shares it): overlapping runs could double-manage a
-# transition or race the journal push. Queued, never cancelled, so a
-# management pass is never skipped.
+# transition or race the journal push. A run in progress is never
+# cancelled, but GitHub keeps only ONE waiting run per group: a newer
+# tick (from either workflow) replaces the one already waiting. That
+# needs the group to be occupied for longer than the tick interval —
+# in practice GitHub failing to supply a runner — and the doctor
+# reports every run replaced this way.
 concurrency:
   group: alpaca-paper-trading-state
   cancel-in-progress: false

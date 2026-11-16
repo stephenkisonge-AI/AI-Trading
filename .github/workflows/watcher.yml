@@ -33,7 +33,11 @@ permissions:
 # One group across ALL workflows that touch the paper account + state
 # repo (swing-manager.yml shares it): overlapping runs could each pass
 # the max-positions gate before the other's fill lands, or race the
-# journal push. Queued, never cancelled.
+# journal push. A run in progress is never cancelled, but GitHub keeps
+# only ONE waiting run per group: a newer tick (from either workflow)
+# replaces the one already waiting. A scan lost that way is cancelled,
+# not successful, so the backup tick's guard below still scans the slot,
+# and the doctor reports the replaced run.
 concurrency:
   group: alpaca-paper-trading-state
   cancel-in-progress: false
@@ -78,13 +82,22 @@ jobs:
           # (the primary never skips), or a schedule run that succeeded.
           # In-flight schedule runs are not counted, so two backup ticks
           # can never each skip in favor of the other.
+          #
+          # "In flight" only counts for 30 minutes. GitHub sometimes
+          # leaves a run "queued" forever (11 such runs Sep–Nov 2026);
+          # a primary stuck like that never scans, and without the age
+          # limit it would make every backup tick in the slot skip.
+          # ISO-8601 UTC timestamps compare correctly as strings.
+          fresh=$(date -u -d "@$(( now - 1800 ))" +%Y-%m-%dT%H:%M:%SZ)
           covered=$(gh api -X GET \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/watcher.yml/runs" \
             -f created=">=${since}" -f per_page=50 \
             --jq "[.workflow_runs[]
                    | select(.id != ${GITHUB_RUN_ID})
                    | select((.event == \"repository_dispatch\"
-                             and (.conclusion == \"success\" or .status != \"completed\"))
+                             and (.conclusion == \"success\"
+                                  or (.status != \"completed\"
+                                      and .created_at > \"${fresh}\")))
                             or (.event == \"schedule\" and .conclusion == \"success\"))]
                   | length")
           echo "slot_start=$(date -u -d "@${slot}" +%Y-%m-%dT%H:%M:%SZ)"

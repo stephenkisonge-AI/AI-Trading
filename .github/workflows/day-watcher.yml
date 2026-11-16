@@ -28,9 +28,13 @@ permissions:
 # Serialize scans — a delayed external-cron tick can land seconds before
 # the next on-time one (observed 34s apart on 2026-07-06). Two CONCURRENT
 # scans both pass the no-position gate before either fill lands, which is
-# the recipe for a double entry. Queued (not cancelled) so a management
-# pass is never skipped; the queued run's entry gates then see the fresh
-# position and skip correctly.
+# the recipe for a double entry. A run in progress is never cancelled;
+# the queued run's entry gates then see the fresh position and skip
+# correctly. GitHub keeps only ONE waiting run per group, though: when a
+# run occupies the group for more than 5 minutes (GitHub slow to supply
+# a runner — ~30 ticks on 2026-08-06 and 2026-10-05), each new tick
+# replaces the one waiting. The survivor does the same management pass,
+# so nothing is skipped beyond the delay itself; the doctor reports it.
 concurrency:
   group: day-watcher-scan
   cancel-in-progress: false
