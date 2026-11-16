@@ -16,7 +16,17 @@ run was green while the system was quietly degraded:
    starts (GitHub platform outage resolving actions, billing blocks)
    can never reach the in-code Telegram error alerts. The doctor reads
    failed runs' annotations, matches them against known signatures,
-   and sends the exact problem plus the fix.
+   and sends the exact problem plus the fix. A job that hits its
+   timeout ends the RUN as "cancelled", not "failure", so cancelled
+   runs are classified too.
+
+3. TICKS THAT NEVER RAN — found 2026-11-16 in four months of history:
+   GitHub keeps only ONE waiting run per concurrency group, so while a
+   run occupies the group (typically waiting ~15 min for a runner that
+   never comes) each new tick cancels the one waiting behind it; and
+   some runs simply stay "queued" forever. Neither shows up as a
+   failure, and both mean scans / management passes silently did not
+   happen.
 
 Read-only: GitHub API GETs plus one Telegram message via
 src.notifier.send_alert. Touches no trading state, so it does NOT
@@ -49,6 +59,14 @@ DAY_DISPATCH_MAX_AGE = timedelta(minutes=30)
 # means a slot was missed. Must stay below the doctor's lookback
 # (default 400 min) or a healthy tick could fall outside the window.
 WATCHER_DISPATCH_MAX_AGE = timedelta(minutes=300)
+
+# A run that has not started this long after it was created is stuck,
+# not merely queued behind another run. Must stay below (lookback −
+# doctor period) = 40 min, or a run could age out of the lookback
+# window between two doctor passes without ever being reported.
+STUCK_RUN_MIN_AGE = timedelta(minutes=30)
+_NOT_STARTED_STATUSES = ("queued", "pending", "waiting", "requested")
+_FAILED_CONCLUSIONS = ("failure", "startup_failure", "timed_out")
 
 # Day-watcher enforcement window: Mon–Fri 15:00–19:30 UTC. Regular US
 # cash hours are 13:30–20:00 UTC in summer and 14:30–21:00 in winter;
@@ -100,6 +118,16 @@ _SIGNATURES = [
         "github.com → Settings → Billing and plans: fix the payment "
         "method or raise the spending limit. Runs resume on their own "
         "afterwards.",
+    ),
+    (
+        "runner_unavailable",
+        re.compile(r"was not acquired by Runner", re.I),
+        "GitHub could not supply a runner — the job waited ~15 min and "
+        "never started. While it waited it occupied the workflow's "
+        "queue, so the ticks behind it were delayed or replaced.",
+        "Nothing to change in the repo; the cadence recovers when "
+        "GitHub does. Check https://www.githubstatus.com if it keeps "
+        "happening.",
     ),
     (
         "job_timeout",
@@ -235,18 +263,27 @@ def fetch_runs(token: str, repo: str, since: datetime,
     return runs
 
 
-def fetch_annotation_text(token: str, repo: str, run_id: int) -> str:
-    """Concatenate annotation messages of a run's failed jobs. A GH
-    Actions job id doubles as a check-run id, which is what the
-    annotations endpoint wants."""
-    jobs_resp = requests.get(
+def fetch_jobs(token: str, repo: str, run_id: int) -> list[dict]:
+    """Jobs of a run. Empty for a run that never started."""
+    resp = requests.get(
         f"{GITHUB_API}/repos/{repo}/actions/runs/{run_id}/jobs",
         headers=_gh_headers(token), timeout=_HTTP_TIMEOUT_SEC)
-    jobs_resp.raise_for_status()
+    resp.raise_for_status()
+    return resp.json().get("jobs", [])
+
+
+def fetch_annotation_text(token: str, repo: str, jobs: list[dict]) -> str:
+    """Concatenate annotation messages of a run's unsuccessful jobs. A
+    GH Actions job id doubles as a check-run id, which is what the
+    annotations endpoint wants.
+
+    "cancelled" jobs are included: a job that timed out, or that no
+    runner ever picked up, is reported as cancelled, and its annotation
+    is the only place the reason is written down.
+    """
     texts: list[str] = []
-    for job in jobs_resp.json().get("jobs", []):
-        if job.get("conclusion") not in ("failure", "startup_failure",
-                                         "timed_out"):
+    for job in jobs:
+        if job.get("conclusion") not in _FAILED_CONCLUSIONS + ("cancelled",):
             continue
         ann_resp = requests.get(
             f"{GITHUB_API}/repos/{repo}/check-runs/{job['id']}/annotations",
@@ -256,27 +293,107 @@ def fetch_annotation_text(token: str, repo: str, run_id: int) -> str:
     return "\n".join(t for t in texts if t)
 
 
+def _count_by_workflow(runs: list[dict]) -> str:
+    """'Day Watcher ×9, Swing Manager ×1' — most affected first."""
+    counts: dict[str, int] = {}
+    for r in runs:
+        name = r.get("name") or "?"
+        counts[name] = counts.get(name, 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{name} ×{n}" for name, n in ordered)
+
+
+_CANCELLED_UNKNOWN_FIX = (
+    "If you cancelled it yourself, ignore this. Otherwise inspect with "
+    "gh run view <run-id>.")
+
+
 def check_failed_runs(token: str, repo: str,
                       runs: list[dict]) -> list[Finding]:
-    """Classify every failed run in the window; identical diagnoses are
-    grouped into one finding listing the affected run ids."""
-    failed = [r for r in runs
-              if r.get("conclusion") in ("failure", "startup_failure",
-                                         "timed_out")]
+    """Classify every failed or cancelled run in the window; identical
+    diagnoses are grouped into one finding listing the affected run ids.
+
+    Cancelled runs matter because that is how GitHub records (a) a job
+    that hit timeout-minutes and (b) a run that was replaced in its
+    concurrency queue before it started — the latter has no jobs at all.
+    """
     grouped: dict[str, dict] = {}
-    for run in failed:
-        text = fetch_annotation_text(token, repo, run["id"])
+    replaced: list[dict] = []
+    for run in runs:
+        conclusion = run.get("conclusion")
+        if conclusion not in _FAILED_CONCLUSIONS + ("cancelled",):
+            continue
+        jobs = fetch_jobs(token, repo, run["id"])
+        if conclusion == "cancelled" and not jobs:
+            replaced.append(run)
+            continue
+        text = fetch_annotation_text(token, repo, jobs)
         name, problem, fix = classify_failure(text)
+        if name == "unknown" and conclusion == "cancelled":
+            name = "cancelled_unknown"
+            problem = ("Cancelled after starting, for no recognized "
+                       "reason (a manual cancel looks like this).")
+            fix = _CANCELLED_UNKNOWN_FIX
         g = grouped.setdefault(name, {"problem": problem, "fix": fix,
                                       "runs": []})
         g["runs"].append(f"{run.get('name')}#{run['id']}")
-    return [
+    findings = [
         Finding("WARN",
                 f"{len(g['runs'])} failed run(s) — {g['problem']} "
                 f"[{', '.join(g['runs'][:5])}]",
                 g["fix"])
         for g in grouped.values()
     ]
+    if replaced:
+        findings.append(Finding(
+            "WARN",
+            f"{len(replaced)} run(s) were cancelled before they started "
+            f"({_count_by_workflow(replaced)}). Each was waiting in its "
+            "workflow's queue and was replaced by a newer tick — GitHub "
+            "keeps only one waiting run per queue. That only happens "
+            "while an earlier run occupies the queue for longer than "
+            "the tick interval, usually because GitHub was slow to "
+            "supply a runner.",
+            "Nothing to change in the repo: the surviving tick does the "
+            "same work, but the cadence was degraded while it lasted. "
+            "If Watcher (the 4-hourly crypto scan) is in the list, check "
+            "Telegram for a (FALLBACK) scan summary for that slot; if "
+            "there is none, run the scan by hand: "
+            "gh workflow run watcher.yml.",
+        ))
+    return findings
+
+
+def check_stuck_runs(runs: list[dict], now: datetime) -> list[Finding]:
+    """Runs GitHub accepted but never started: still queued/pending
+    long after creation. They are not failures and never will be, so
+    nothing else reports them — on 2026-11-11 six consecutive Day
+    Watcher ticks (15:25–15:50 ET) stayed queued for good."""
+    stuck = []
+    for r in runs:
+        if r.get("status") not in _NOT_STARTED_STATUSES:
+            continue
+        created = datetime.fromisoformat(
+            r["created_at"].replace("Z", "+00:00"))
+        if now - created > STUCK_RUN_MIN_AGE:
+            stuck.append((created, r))
+    if not stuck:
+        return []
+    stuck.sort(key=lambda cr: cr[0])
+    oldest = stuck[0][0].strftime("%Y-%m-%d %H:%M UTC")
+    ids = " ".join(str(r["id"]) for _, r in stuck[:8])
+    return [Finding(
+        "WARN",
+        f"{len(stuck)} run(s) never started — still waiting on GitHub "
+        f"more than {int(STUCK_RUN_MIN_AGE.total_seconds() // 60)} min "
+        f"after they were created "
+        f"({_count_by_workflow([r for _, r in stuck])}; oldest "
+        f"{oldest}). Those ticks did no work.",
+        "GitHub-side fault; nothing to change in the repo, and later "
+        "ticks normally run fine. Cancel the stuck runs so they cannot "
+        f"start late: gh run cancel <run-id> for each of: {ids}. Check "
+        "https://www.githubstatus.com if new ones keep appearing.",
+    )]
 
 
 # --- report ---------------------------------------------------------------
@@ -299,7 +416,8 @@ def healthy_message(n_runs: int, lookback_minutes: int,
     dead one)."""
     msg = (f"🩺 doctor ✓ all healthy — {n_runs} runs checked in the last "
            f"{lookback_minutes // 60}h{lookback_minutes % 60:02d}m: "
-           f"dispatch ticks on schedule, no failed runs.")
+           f"dispatch ticks on schedule, no failed, cancelled or stuck "
+           f"runs.")
     if equity is not None:
         msg += f" Paper equity: ${equity:,.2f}."
     return msg
@@ -347,6 +465,7 @@ def main(argv=None) -> int:
 
     findings = check_dispatch_cadence(runs, now)
     findings += check_failed_runs(token, repo, runs)
+    findings += check_stuck_runs(runs, now)
     report = build_report(findings)
     if report is None:
         report = healthy_message(len(runs), args.lookback_minutes,
