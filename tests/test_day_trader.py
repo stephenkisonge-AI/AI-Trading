@@ -606,6 +606,52 @@ def test_management_spy_vwap_break_hard_exit():
     assert res["close_order_id"] is not None
 
 
+def test_spy_vwap_break_seen_when_in_progress_bar_not_published_yet():
+    # Tick in the FIRST minute of a 5-min bucket (14:15:31 UTC): Alpaca
+    # has not published the 14:15 bar yet, so the last row is the 14:10
+    # bar, which CLOSED below VWAP at 14:15. The old "drop the last row"
+    # rule threw it away and exited a tick late (META 2026-09-15,
+    # GOOGL 2026-11-16).
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(),
+    ])
+    now = datetime(2026, 5, 28, 14, 15, 31, tzinfo=_UTC).astimezone(_ET)
+    spy = pd.DataFrame(
+        {"close": [401.0, 399.0], "vwap": [400.5, 400.5]},
+        index=pd.DatetimeIndex([
+            datetime(2026, 5, 28, 14, 5, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),  # closed at 14:15
+        ]),
+    )
+    res = manage_position(client=client, position=pos, now_et=now,
+                          spy_5min_with_indicators=spy)
+    assert res is not None
+    assert res["action"] == "hard_exit_spy_vwap_break"
+
+
+def test_spy_vwap_break_still_ignores_the_bar_in_progress():
+    # 14:12 UTC: the 14:10 bar is still forming — its below-VWAP print
+    # must not trigger an exit yet.
+    pos = _open_position()
+    client = MgmtFakeClient(orders=[
+        _filled_buy_order(filled_at=datetime(2026, 5, 28, 14, 0, tzinfo=_UTC)),
+        _open_stop_order(),
+    ])
+    now = datetime(2026, 5, 28, 14, 12, tzinfo=_UTC).astimezone(_ET)
+    spy = pd.DataFrame(
+        {"close": [401.0, 399.0], "vwap": [400.5, 400.5]},
+        index=pd.DatetimeIndex([
+            datetime(2026, 5, 28, 14, 5, tzinfo=_UTC),
+            datetime(2026, 5, 28, 14, 10, tzinfo=_UTC),  # in progress
+        ]),
+    )
+    res = manage_position(client=client, position=pos, now_et=now,
+                          spy_5min_with_indicators=spy)
+    assert res is None
+
+
 def test_management_spy_vwap_break_ignores_bars_before_entry():
     # SPY broke VWAP at 13:55 — BEFORE our 14:00 fill. Should not trigger.
     pos = _open_position()

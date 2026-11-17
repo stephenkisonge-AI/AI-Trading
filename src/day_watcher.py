@@ -481,6 +481,15 @@ def run_intraday_scan(now_et: datetime) -> dict:
             action = act.get("action", "?")
             reason = act.get("reason", "")
             err = act.get("error")
+            # Also to stdout: the run-log archive is the only durable
+            # record of WHY a day-trade position was closed (no journal
+            # for this strand); Telegram alone left the 2026-11-16 GOOGL
+            # exit unexplained in its log.
+            print(f"[day-watcher] mgmt {symbol} action={action}"
+                  f" reason={reason!r} error={err!r}"
+                  f" cancelled={len(act.get('cancelled_orders', []) or [])}"
+                  f" close_attempts={act.get('close_attempts')}"
+                  f" qty={act.get('qty')} stop={act.get('stop_price')}")
             if err:
                 send_alert(f"⚠️ MGMT ERROR — {symbol} {action}: {err}")
             elif action == "breakeven_move":

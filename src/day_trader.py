@@ -1195,22 +1195,40 @@ def _move_stop_to_breakeven(client, symbol: str, position, old_stop,
 
 
 def _spy_broke_vwap_after(spy_5min_with_indicators, entry_fill_time_utc: datetime,
-                          direction: str = "long") -> bool:
+                          direction: str = "long",
+                          now_utc: datetime | None = None,
+                          bar_minutes: int = 5) -> bool:
     """True if any closed SPY 5-min bar AFTER our entry fill closed on the
     adverse side of its session VWAP — below for longs (buyers lost the
     tape), ABOVE for shorts (sellers lost it).
 
     `spy_5min_with_indicators` is already pulled + computed by the
     watcher — re-using it here avoids a second Alpaca round-trip.
+
+    Only CLOSED bars count. With `now_utc` a bar is closed once its
+    bucket START + `bar_minutes` <= now (Alpaca stamps bars with their
+    start), the same rule as the watcher's _drop_in_progress_bars.
+
+    It used to drop the last row blindly, assuming it was in progress.
+    But Alpaca builds a 5-min bar from minute bars and only publishes a
+    minute bar once that minute is over, so during the first minute of
+    a bucket the in-progress bar does not exist yet — and the dropped
+    "last row" was the bar that had just CLOSED. Watcher ticks usually
+    run in that first minute, so the exit fired one tick (5 min) late:
+    META 2026-09-15 (run at 14:25:31 ET) and GOOGL 2026-11-16 (run at
+    11:40:57 ET) each exited a tick after SPY closed below VWAP, ~$41
+    worse between them. Without `now_utc` the old behaviour is kept.
     """
     if spy_5min_with_indicators is None or len(spy_5min_with_indicators) == 0:
         return False
     df = spy_5min_with_indicators
-    # Index is tz-aware UTC. Drop in-progress (last) bar — only closed
-    # bars count for hard exits.
-    if len(df) < 2:
-        return False
-    closed = df.iloc[:-1]
+    # Index is tz-aware UTC.
+    if now_utc is not None:
+        closed = df[df.index + timedelta(minutes=bar_minutes) <= now_utc]
+    else:
+        if len(df) < 2:
+            return False
+        closed = df.iloc[:-1]
     after_entry = closed[closed.index > entry_fill_time_utc]
     if len(after_entry) == 0:
         return False
@@ -1287,7 +1305,7 @@ def manage_position(
 
     # --- 3. SPY VWAP break against our direction after entry ---
     if _spy_broke_vwap_after(spy_5min_with_indicators, fill_time_utc,
-                             direction=direction):
+                             direction=direction, now_utc=now_utc):
         side_word = "above" if is_short else "below"
         res = _close_position_market(
             client, symbol, position,
